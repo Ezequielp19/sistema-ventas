@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { ref, push, set, remove } from "firebase/database"
+import { ref, push, set, remove, onValue, off, get } from "firebase/database"
 import { ref as storageRef, uploadBytes as uploadStorageBytes, getDownloadURL as getStorageDownloadURL } from "firebase/storage"
 import { database, storage } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
-import { Plus, Edit, Trash2, Search, X, Share2, ShoppingCart, Image, Upload, Copy, ExternalLink, Package, Store, MoreVertical } from "lucide-react"
+import { Plus, Trash2, Search, X, Share2, ShoppingCart, Image, Upload, Copy, ExternalLink, Package, Store, MoreVertical } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Pagination } from "@/components/ui/pagination"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -45,9 +45,8 @@ interface User {
   empresa?: string
 }
 
-export default function TiendaTab({ productos, user }: { productos: Record<string, Producto>, user: User }) {
-  const [showDialog, setShowDialog] = useState(false)
-  const [editingProduct, setEditingProduct] = useState<string | null>(null)
+export default function TiendaTab({ productos: productosProp, user }: { productos?: Record<string, Producto>, user: User }) {
+  const [productos, setProductos] = useState<Record<string, Producto>>({})
   const [searchTerm, setSearchTerm] = useState("")
   const [filterCategoria, setFilterCategoria] = useState("todas")
   const [currentPage, setCurrentPage] = useState(1)
@@ -70,6 +69,42 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
   const { toast } = useToast()
   const itemsPerPage = 12
 
+  // Cargar productos desde Firebase
+  useEffect(() => {
+    const userId = user?.uid || user?.id
+    if (!userId) return
+
+    const productosRef = ref(database, `tiendas/${userId}/productos`)
+    const unsubscribe = onValue(productosRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setProductos(snapshot.val())
+      } else {
+        setProductos({})
+      }
+    })
+
+    return () => {
+      off(productosRef, 'value', unsubscribe)
+    }
+  }, [user?.uid, user?.id])
+
+  // También cargar desde usuarios si no hay productos en tiendas (para compatibilidad)
+  useEffect(() => {
+    const userId = user?.uid || user?.id
+    if (!userId || Object.keys(productos).length > 0) return
+
+    const productosUsuariosRef = ref(database, `usuarios/${userId}/productos`)
+    const unsubscribe = onValue(productosUsuariosRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setProductos(snapshot.val())
+      }
+    })
+
+    return () => {
+      off(productosUsuariosRef, 'value', unsubscribe)
+    }
+  }, [user?.uid, user?.id, productos])
+
   const [formData, setFormData] = useState({
     nombre: "",
     descripcion: "",
@@ -83,11 +118,20 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
 
   // Cargar configuración de la tienda
   useEffect(() => {
-    if (user?.uid) {
-      const tiendaRef = ref(database, `tiendas/${user.uid}/config`)
-      // Aquí podrías cargar la configuración si existe
+    const userId = user?.uid || user?.id
+    if (!userId) return
+
+    const tiendaRef = ref(database, `tiendas/${userId}/config`)
+    const unsubscribe = onValue(tiendaRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setTiendaConfig(snapshot.val())
+      }
+    })
+
+    return () => {
+      off(tiendaRef, 'value', unsubscribe)
     }
-  }, [user])
+  }, [user?.uid, user?.id])
 
   const resetForm = () => {
     setFormData({
@@ -100,17 +144,18 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
       destacado: false,
       activo: true
     })
-    setEditingProduct(null)
     setSelectedImage(null)
     setImagePreview("")
   }
 
   const handleImageUpload = async (file: File) => {
     if (!file) return ""
+    const userId = user?.uid || user?.id
+    if (!userId) return ""
     
     setUploadingImage(true)
     try {
-      const imageRef = storageRef(storage, `tienda/${user.uid}/${Date.now()}_${file.name}`)
+      const imageRef = storageRef(storage, `tienda/${userId}/${Date.now()}_${file.name}`)
       const snapshot = await uploadStorageBytes(imageRef, file)
       const downloadURL = await getStorageDownloadURL(snapshot.ref)
       setUploadingImage(false)
@@ -144,6 +189,15 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const userId = user?.uid || user?.id
+    if (!userId) {
+      toast({
+        title: "Error",
+        description: "Usuario no identificado",
+        variant: "destructive"
+      })
+      return
+    }
 
     let imagenURL = formData.imagen
     
@@ -157,25 +211,16 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
       stock: Number.parseInt(formData.stock),
       imagen: imagenURL,
       fechaCreacion: new Date().toISOString(),
-      tiendaId: user.uid
+      tiendaId: userId
     }
 
     try {
-      if (editingProduct) {
-        await set(ref(database, `tiendas/${user.uid}/productos/${editingProduct}`), productData)
-        toast({
-          title: "Producto actualizado",
-          description: "El producto se actualizó correctamente"
-        })
-      } else {
-        await push(ref(database, `tiendas/${user.uid}/productos`), productData)
-        toast({
-          title: "Producto agregado",
-          description: "El producto se agregó correctamente"
-        })
-      }
+      await push(ref(database, `tiendas/${userId}/productos`), productData)
+      toast({
+        title: "Producto agregado",
+        description: "El producto se agregó correctamente"
+      })
 
-      setShowDialog(false)
       resetForm()
     } catch (error) {
       console.error("Error al guardar producto:", error)
@@ -187,17 +232,13 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
     }
   }
 
-  const handleEdit = (id, producto) => {
-    setEditingProduct(id)
-    setFormData(producto)
-    setImagePreview(producto.imagen || "")
-    setShowDialog(true)
-  }
-
   const handleDelete = async (id) => {
+    const userId = user?.uid || user?.id
+    if (!userId) return
+
     if (confirm("¿Estás seguro de eliminar este producto?")) {
       try {
-        await remove(ref(database, `tiendas/${user.uid}/productos/${id}`))
+        await remove(ref(database, `tiendas/${userId}/productos/${id}`))
         toast({
           title: "Producto eliminado",
           description: "El producto se eliminó correctamente"
@@ -266,8 +307,9 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
   const productosPaginados = productosFiltrados.slice(startIndex, startIndex + itemsPerPage)
 
   const categorias = [...new Set(Object.values(productos || {}).map(p => p.categoria).filter(Boolean))]
+  const userId = user?.uid || user?.id
 
-  if (!user?.uid) {
+  if (!userId) {
     return (
       <div className="space-y-6">
         <div className="text-center py-12">
@@ -304,8 +346,8 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
             <Button
               variant="outline"
               onClick={() => {
-                if (user?.uid) {
-                  const tiendaURL = `${window.location.origin}/tienda/${user.uid}`
+                if (userId) {
+                  const tiendaURL = `${window.location.origin}/tienda/${userId}`
                   copyToClipboard(tiendaURL)
                 } else {
                   toast({
@@ -315,19 +357,19 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
                   })
                 }
               }}
-              disabled={!user?.uid}
+              disabled={!userId}
             >
               <Share2 className="h-4 w-4 mr-2" />
               Compartir Catálogo
             </Button>
             <Button
               onClick={() => {
-                if (user?.uid) {
-                  const tiendaURL = `${window.location.origin}/tienda/${user.uid}`
+                if (userId) {
+                  const tiendaURL = `${window.location.origin}/tienda/${userId}`
                   window.open(tiendaURL, '_blank')
                 }
               }}
-              disabled={!user?.uid}
+              disabled={!userId}
             >
               <ExternalLink className="h-4 w-4 mr-2" />
               Ver mi Tienda
@@ -372,7 +414,7 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
                     {producto.destacado && (
                       <Badge className="bg-amber-400 text-amber-900 font-semibold py-1 px-3 rounded-full shadow-md">Destacado</Badge>
                     )}
-                    {!producto.activo && (
+                    {producto.activo === false && (
                       <Badge variant="destructive" className="font-semibold py-1 px-3 rounded-full shadow-md">Inactivo</Badge>
                     )}
                   </div>
@@ -399,14 +441,6 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
                   </div>
                 </CardContent>
                 <div className="p-2 border-t border-slate-200 dark:border-slate-700/50 flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => handleEdit(producto.id, producto)}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Editar
-                  </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button size="sm" variant="outline" className="px-2">
@@ -491,12 +525,12 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
                     <Label>Enlace directo del producto</Label>
                     <div className="flex gap-2">
                       <Input
-                        value={`${window.location.origin}/tienda/${user.uid}/producto/${selectedProductForShare.id}`}
+                        value={`${window.location.origin}/tienda/${userId}/producto/${selectedProductForShare.id}`}
                         readOnly
                       />
                       <Button
                         variant="outline"
-                        onClick={() => copyToClipboard(`${window.location.origin}/tienda/${user.uid}/producto/${selectedProductForShare.id}`)}
+                        onClick={() => copyToClipboard(`${window.location.origin}/tienda/${userId}/producto/${selectedProductForShare.id}`)}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -515,14 +549,14 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
                     <Label>Enlace del catálogo completo</Label>
                     <div className="flex gap-2">
                       <Input
-                        value={user?.uid ? `${window.location.origin}/tienda/${user.uid}` : "Usuario no identificado"}
+                        value={userId ? `${window.location.origin}/tienda/${userId}` : "Usuario no identificado"}
                         readOnly
                       />
                       <Button
                         variant="outline"
                         onClick={() => {
-                          if (user?.uid) {
-                            copyToClipboard(`${window.location.origin}/tienda/${user.uid}`)
+                          if (userId) {
+                            copyToClipboard(`${window.location.origin}/tienda/${userId}`)
                           } else {
                             toast({
                               title: "Error",
@@ -531,7 +565,7 @@ export default function TiendaTab({ productos, user }: { productos: Record<strin
                             })
                           }
                         }}
-                        disabled={!user?.uid}
+                        disabled={!userId}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>

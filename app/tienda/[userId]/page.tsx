@@ -104,16 +104,26 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
   }, [userId])
 
   const productosFiltrados = Object.entries(productos || {})
-    .map(([id, producto]) => ({ ...producto, id }))
+    .map(([id, producto]) => ({ 
+      ...producto, 
+      id,
+      // Normalizar campos: usar precioVenta si existe, sino precio
+      precio: producto.precioVenta || producto.precio || 0,
+      // Normalizar categoría: usar categoria si existe, sino tipo
+      categoria: producto.categoria || producto.tipo || "",
+      // Asegurar que activo sea boolean (por defecto true si no está definido)
+      activo: producto.activo !== false
+    }))
     .filter(producto => {
-      const isActive = producto.activo && producto.stock > 0
+      // Filtrar productos activos con stock > 0
+      const isActive = producto.activo !== false && producto.stock > 0
       if (!isActive) return false
 
       const matchesSearch = searchTerm.trim() === '' ||
                            producto.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            producto.descripcion?.toLowerCase().includes(searchTerm.toLowerCase())
       
-      const matchesCategoria = filterCategoria === "todas" || producto.categoria === filterCategoria
+      const matchesCategoria = filterCategoria === "todas" || !filterCategoria || producto.categoria === filterCategoria
       
       return matchesSearch && matchesCategoria
     })
@@ -121,7 +131,7 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
   const totalPages = Math.ceil(productosFiltrados.length / itemsPerPage)
   const productosPaginados = productosFiltrados.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
-  const categorias = [...new Set(Object.values(productos || {}).map(p => p.categoria).filter(Boolean))]
+  const categorias = [...new Set(Object.values(productos || {}).map(p => p.categoria || p.tipo).filter(Boolean))]
 
   const generateWhatsAppMessage = (producto: Producto) => {
     return encodeURIComponent(

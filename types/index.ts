@@ -11,6 +11,7 @@ export interface Producto {
   proveedor?: string
   tipo?: string
   codigo?: string
+  imagen?: string
   fechaCreacion?: string
 }
 

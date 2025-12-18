@@ -1,15 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ref, set, onValue } from "firebase/database"
-import { database } from "@/lib/firebase"
+import { ref as storageRef, uploadBytes as uploadStorageBytes, getDownloadURL as getStorageDownloadURL } from "firebase/storage"
+import { database, storage } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { Settings, Save, Store, Phone, MapPin, Clock, MessageCircle } from "lucide-react"
+import { Settings, Save, Store, Phone, MapPin, Clock, MessageCircle, Upload, Image, X } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface TiendaConfig {
@@ -48,6 +49,10 @@ export default function TiendaConfig({ user }: { user: User }) {
     email: "",
     redesSociales: {}
   })
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [selectedLogo, setSelectedLogo] = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState("")
+  const logoInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
   // Cargar configuración existente
@@ -58,22 +63,97 @@ export default function TiendaConfig({ user }: { user: User }) {
         const data = snapshot.val()
         if (data) {
           setConfig(prev => ({ ...prev, ...data }))
+          setLogoPreview(data.logo || "")
         }
       })
       return () => unsubscribe()
     }
   }, [user])
 
+  const handleLogoSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      // Validar tipo de archivo
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: "Error",
+          description: "Por favor selecciona un archivo de imagen válido",
+          variant: "destructive"
+        })
+        return
+      }
+      // Validar tamaño (máximo 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast({
+          title: "Error",
+          description: "La imagen es demasiado grande. Máximo 5MB",
+          variant: "destructive"
+        })
+        return
+      }
+      setSelectedLogo(file)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const result = e.target?.result
+        if (typeof result === 'string') {
+          setLogoPreview(result)
+        }
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleLogoUpload = async (file: File) => {
+    if (!file || !user?.uid) return ""
+    
+    setUploadingLogo(true)
+    try {
+      const logoRef = storageRef(storage, `tienda/${user.uid}/logo/${Date.now()}_${file.name}`)
+      const snapshot = await uploadStorageBytes(logoRef, file)
+      const downloadURL = await getStorageDownloadURL(snapshot.ref)
+      setUploadingLogo(false)
+      return downloadURL
+    } catch (error) {
+      console.error("Error al subir logo:", error)
+      setUploadingLogo(false)
+      toast({
+        title: "Error",
+        description: "No se pudo subir el logo",
+        variant: "destructive"
+      })
+      return ""
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
+    let logoURL = config.logo
+    
+    // Subir logo si hay uno nuevo seleccionado
+    if (selectedLogo) {
+      logoURL = await handleLogoUpload(selectedLogo)
+      if (!logoURL) {
+        return // Si falla la subida, no continuar
+      }
+    }
+
+    const configToSave = {
+      ...config,
+      logo: logoURL
+    }
+    
     try {
-      await set(ref(database, `tiendas/${user.uid}/config`), config)
+      await set(ref(database, `tiendas/${user.uid}/config`), configToSave)
       toast({
         title: "Configuración guardada",
         description: "La configuración de tu tienda se guardó correctamente"
       })
       setShowDialog(false)
+      setSelectedLogo(null)
+      if (logoInputRef.current) {
+        logoInputRef.current.value = ""
+      }
     } catch (error) {
       console.error("Error al guardar configuración:", error)
       toast({
@@ -121,6 +201,70 @@ export default function TiendaConfig({ user }: { user: User }) {
             </DialogHeader>
             
             <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Campo de Logo */}
+              <div className="space-y-2">
+                <Label htmlFor="logo">Logo de la Tienda (Opcional)</Label>
+                <div className="space-y-2">
+                  {logoPreview && (
+                    <div className="relative w-32 h-32 border rounded-lg overflow-hidden">
+                      <img
+                        src={logoPreview}
+                        alt="Vista previa del logo"
+                        className="w-full h-full object-cover"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="absolute top-1 right-1"
+                        onClick={() => {
+                          setLogoPreview("")
+                          setSelectedLogo(null)
+                          setConfig(prev => ({ ...prev, logo: "" }))
+                          if (logoInputRef.current) {
+                            logoInputRef.current.value = ""
+                          }
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="logo"
+                      type="file"
+                      accept="image/*"
+                      ref={logoInputRef}
+                      onChange={handleLogoSelect}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={uploadingLogo}
+                      className="flex-1"
+                    >
+                      {uploadingLogo ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                          Subiendo...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          {logoPreview ? "Cambiar Logo" : "Seleccionar Logo"}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Formatos soportados: JPG, PNG, GIF. Tamaño máximo: 5MB. Se recomienda una imagen cuadrada.
+                  </p>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="nombre">Nombre de la Tienda *</Label>
@@ -256,9 +400,22 @@ export default function TiendaConfig({ user }: { user: User }) {
             <Store className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="space-y-2">
-            <div>
-              <p className="text-sm font-medium">{config.nombre}</p>
-              <p className="text-xs text-muted-foreground">{config.descripcion}</p>
+            <div className="flex items-center gap-3">
+              {config.logo ? (
+                <img 
+                  src={config.logo} 
+                  alt={config.nombre}
+                  className="w-16 h-16 rounded-full object-cover border-2 border-slate-200 dark:border-slate-700"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center border-2 border-slate-200 dark:border-slate-700">
+                  <Store className="h-8 w-8 text-white" />
+                </div>
+              )}
+              <div>
+                <p className="text-sm font-medium">{config.nombre}</p>
+                <p className="text-xs text-muted-foreground">{config.descripcion}</p>
+              </div>
             </div>
           </CardContent>
         </Card>

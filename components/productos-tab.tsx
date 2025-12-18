@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ref, set, remove, get } from "firebase/database"
-import { database } from "@/lib/firebase"
+import { ref as storageRef, uploadBytes as uploadStorageBytes, getDownloadURL as getStorageDownloadURL } from "firebase/storage"
+import { database, storage } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -11,20 +12,26 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Edit, Trash2, Search, X } from "lucide-react"
+import { Plus, Edit, Trash2, Search, X, Image, Upload } from "lucide-react"
 import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
+import { useToast } from "@/hooks/use-toast"
 
 export default function ProductosTab({ proveedores }) {
   const { user } = useAuth()
+  const { toast } = useToast()
   const [productos, setProductos] = useState({})
   const [showDialog, setShowDialog] = useState(false)
   const [editingProduct, setEditingProduct] = useState(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [filterProveedor, setFilterProveedor] = useState("")
   const [filterTipo, setFilterTipo] = useState("")
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState("")
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1)
@@ -40,6 +47,7 @@ export default function ProductosTab({ proveedores }) {
     proveedor: "",
     tipo: "",
     codigo: "",
+    imagen: "",
   })
 
   const resetForm = () => {
@@ -53,8 +61,69 @@ export default function ProductosTab({ proveedores }) {
       proveedor: "",
       tipo: "",
       codigo: "",
+      imagen: "",
     })
     setEditingProduct(null)
+    setSelectedImage(null)
+    setImagePreview("")
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+  }
+
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      // Validar tipo de archivo
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: "Error",
+          description: "Por favor selecciona un archivo de imagen válido",
+          variant: "destructive"
+        })
+        return
+      }
+      // Validar tamaño (máximo 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast({
+          title: "Error",
+          description: "La imagen es demasiado grande. Máximo 5MB",
+          variant: "destructive"
+        })
+        return
+      }
+      setSelectedImage(file)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const result = e.target?.result
+        if (typeof result === 'string') {
+          setImagePreview(result)
+        }
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleImageUpload = async (file: File) => {
+    if (!file || !user?.id) return ""
+    
+    setUploadingImage(true)
+    try {
+      const imageRef = storageRef(storage, `productos/${user.id}/${Date.now()}_${file.name}`)
+      const snapshot = await uploadStorageBytes(imageRef, file)
+      const downloadURL = await getStorageDownloadURL(snapshot.ref)
+      setUploadingImage(false)
+      return downloadURL
+    } catch (error) {
+      console.error("Error al subir imagen:", error)
+      setUploadingImage(false)
+      toast({
+        title: "Error",
+        description: "No se pudo subir la imagen",
+        variant: "destructive"
+      })
+      return ""
+    }
   }
 
   const generarIdProducto = () => {
@@ -110,7 +179,11 @@ export default function ProductosTab({ proveedores }) {
     e.preventDefault()
 
     if (!user?.id) {
-      alert("Usuario no autenticado")
+      toast({
+        title: "Error",
+        description: "Usuario no autenticado",
+        variant: "destructive"
+      })
       return
     }
 
@@ -119,7 +192,6 @@ export default function ProductosTab({ proveedores }) {
       !formData.nombre.trim() ||
       !formData.codigo.trim() ||
       !formData.tipo.trim() ||
-      !formData.proveedor.trim() ||
       !formData.precioVenta ||
       isNaN(Number(formData.precioVenta)) ||
       !formData.stock ||
@@ -127,8 +199,22 @@ export default function ProductosTab({ proveedores }) {
       !formData.stockMinimo ||
       isNaN(Number(formData.stockMinimo))
     ) {
-      alert("Completa todos los campos obligatorios correctamente.")
+      toast({
+        title: "Error",
+        description: "Completa todos los campos obligatorios correctamente.",
+        variant: "destructive"
+      })
       return
+    }
+
+    let imagenURL = formData.imagen
+    
+    // Subir imagen si hay una nueva seleccionada
+    if (selectedImage) {
+      imagenURL = await handleImageUpload(selectedImage)
+      if (!imagenURL) {
+        return // Si falla la subida, no continuar
+      }
     }
 
     const productId = editingProduct || generarIdProducto()
@@ -137,6 +223,9 @@ export default function ProductosTab({ proveedores }) {
       precioVenta: Number.parseFloat(formData.precioVenta),
       stock: Number.parseInt(formData.stock),
       stockMinimo: Number.parseInt(formData.stockMinimo),
+      proveedor: formData.proveedor || null, // Guardar null si no hay proveedor
+      imagen: imagenURL || null, // Guardar null si no hay imagen
+      activo: true, // Por defecto los productos están activos
       fechaCreacion: new Date().toISOString(),
       usuarioId: user.id,
       id: productId,
@@ -144,11 +233,19 @@ export default function ProductosTab({ proveedores }) {
 
     try {
       await set(ref(database, `tiendas/${user.id}/productos/${productId}`), productData)
+      toast({
+        title: "Éxito",
+        description: editingProduct ? "Producto actualizado correctamente" : "Producto creado correctamente"
+      })
       setShowDialog(false)
       resetForm()
       await cargarProductos()
     } catch (error) {
-      alert("Error al guardar producto: " + error.message)
+      toast({
+        title: "Error",
+        description: "Error al guardar producto: " + error.message,
+        variant: "destructive"
+      })
       console.error("Error al guardar producto:", error)
     }
   }
@@ -160,8 +257,15 @@ export default function ProductosTab({ proveedores }) {
       ...producto,
       // precioCompra: producto.precioCompra || producto.precio, // Eliminado
       precioVenta: producto.precioVenta || producto.precio, // Asegurarse de que se use este
+      proveedor: producto.proveedor || "", // Asegurar que sea string vacío si no hay proveedor
+      imagen: producto.imagen || "", // Asegurar que la imagen esté presente
     }
     setFormData(productToEdit)
+    setImagePreview(producto.imagen || "")
+    setSelectedImage(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
     setShowDialog(true)
   }
 
@@ -240,7 +344,7 @@ export default function ProductosTab({ proveedores }) {
                   Nuevo Producto
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>
                     {editingProduct ? "Editar Producto" : "Nuevo Producto"}
@@ -288,12 +392,13 @@ export default function ProductosTab({ proveedores }) {
                       />
                     </div>
                     <div>
-                      <Label htmlFor="proveedor">Proveedor</Label>
-                      <Select value={formData.proveedor} onValueChange={(value) => setFormData({ ...formData, proveedor: value })}>
+                      <Label htmlFor="proveedor">Proveedor (Opcional)</Label>
+                      <Select value={formData.proveedor || ""} onValueChange={(value) => setFormData({ ...formData, proveedor: value === "none" ? "" : value })}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Seleccionar proveedor" />
+                          <SelectValue placeholder="Seleccionar proveedor (opcional)" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="none">Sin proveedor</SelectItem>
                           {Object.entries(proveedores).map(([id, proveedor]) => (
                             <SelectItem key={id} value={id}>
                               {proveedor.nombre}
@@ -335,6 +440,70 @@ export default function ProductosTab({ proveedores }) {
                         onChange={(e) => setFormData({ ...formData, stockMinimo: e.target.value })}
                         required
                       />
+                    </div>
+                  </div>
+
+                  {/* Campo de imagen */}
+                  <div>
+                    <Label htmlFor="imagen">Imagen del Producto (Opcional)</Label>
+                    <div className="space-y-2">
+                      {imagePreview && (
+                        <div className="relative w-full h-48 border rounded-lg overflow-hidden">
+                          <img
+                            src={imagePreview}
+                            alt="Vista previa"
+                            className="w-full h-full object-cover"
+                          />
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            className="absolute top-2 right-2"
+                            onClick={() => {
+                              setImagePreview("")
+                              setSelectedImage(null)
+                              setFormData({ ...formData, imagen: "" })
+                              if (fileInputRef.current) {
+                                fileInputRef.current.value = ""
+                              }
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="imagen"
+                          type="file"
+                          accept="image/*"
+                          ref={fileInputRef}
+                          onChange={handleImageSelect}
+                          className="hidden"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadingImage}
+                          className="flex-1"
+                        >
+                          {uploadingImage ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                              Subiendo...
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="h-4 w-4 mr-2" />
+                              {imagePreview ? "Cambiar Imagen" : "Seleccionar Imagen"}
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Formatos soportados: JPG, PNG, GIF. Tamaño máximo: 5MB
+                      </p>
                     </div>
                   </div>
 
@@ -407,6 +576,7 @@ export default function ProductosTab({ proveedores }) {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Imagen</TableHead>
                 <TableHead>Código</TableHead>
                 <TableHead>Nombre</TableHead>
                 <TableHead>Tipo</TableHead>
@@ -421,13 +591,28 @@ export default function ProductosTab({ proveedores }) {
             <TableBody>
               {currentItems.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center">
+                  <TableCell colSpan={9} className="h-24 text-center">
                     No se encontraron productos
                   </TableCell>
                 </TableRow>
               ) : (
                 currentItems.map((producto) => (
                   <TableRow key={producto.id}>
+                    <TableCell>
+                      {producto.imagen ? (
+                        <div className="w-12 h-12 rounded overflow-hidden border">
+                          <img
+                            src={producto.imagen}
+                            alt={producto.nombre}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-12 h-12 rounded border flex items-center justify-center bg-muted">
+                          <Image className="h-6 w-6 text-muted-foreground" />
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="font-mono">{producto.codigo}</TableCell>
                     <TableCell className="font-medium">{producto.nombre}</TableCell>
                     <TableCell>{producto.tipo}</TableCell>
