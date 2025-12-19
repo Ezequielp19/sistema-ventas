@@ -29,8 +29,8 @@ export default function ProductosTab({ proveedores }) {
   const [filterProveedor, setFilterProveedor] = useState("")
   const [filterTipo, setFilterTipo] = useState("")
   const [uploadingImage, setUploadingImage] = useState(false)
-  const [selectedImage, setSelectedImage] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState("")
+  const [selectedImages, setSelectedImages] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Paginación
@@ -47,7 +47,7 @@ export default function ProductosTab({ proveedores }) {
     proveedor: "",
     tipo: "",
     codigo: "",
-    imagen: "",
+    imagenes: [] as string[],
   })
 
   const resetForm = () => {
@@ -61,24 +61,29 @@ export default function ProductosTab({ proveedores }) {
       proveedor: "",
       tipo: "",
       codigo: "",
-      imagen: "",
+      imagenes: [],
     })
     setEditingProduct(null)
-    setSelectedImage(null)
-    setImagePreview("")
+    setSelectedImages([])
+    setImagePreviews([])
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
   }
 
   const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (file) {
+    const files = event.target.files
+    if (!files || files.length === 0) return
+
+    const newFiles: File[] = []
+    const newPreviews: string[] = []
+
+    Array.from(files).forEach((file) => {
       // Validar tipo de archivo
       if (!file.type.startsWith('image/')) {
         toast({
           title: "Error",
-          description: "Por favor selecciona un archivo de imagen válido",
+          description: `${file.name} no es un archivo de imagen válido`,
           variant: "destructive"
         })
         return
@@ -87,43 +92,56 @@ export default function ProductosTab({ proveedores }) {
       if (file.size > 5 * 1024 * 1024) {
         toast({
           title: "Error",
-          description: "La imagen es demasiado grande. Máximo 5MB",
+          description: `${file.name} es demasiado grande. Máximo 5MB`,
           variant: "destructive"
         })
         return
       }
-      setSelectedImage(file)
+      newFiles.push(file)
       const reader = new FileReader()
       reader.onload = (e) => {
         const result = e.target?.result
         if (typeof result === 'string') {
-          setImagePreview(result)
+          newPreviews.push(result)
+          if (newPreviews.length === newFiles.length) {
+            setSelectedImages(prev => [...prev, ...newFiles])
+            setImagePreviews(prev => [...prev, ...newPreviews])
+          }
         }
       }
       reader.readAsDataURL(file)
+    })
+
+    // Limpiar el input para permitir seleccionar el mismo archivo nuevamente
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
     }
   }
 
-  const handleImageUpload = async (file: File) => {
-    if (!file || !user?.id) return ""
+  const handleImageUpload = async (files: File[]): Promise<string[]> => {
+    if (!files || files.length === 0 || !user?.id) return []
     
     setUploadingImage(true)
-    try {
-      const imageRef = storageRef(storage, `productos/${user.id}/${Date.now()}_${file.name}`)
-      const snapshot = await uploadStorageBytes(imageRef, file)
-      const downloadURL = await getStorageDownloadURL(snapshot.ref)
-      setUploadingImage(false)
-      return downloadURL
-    } catch (error) {
-      console.error("Error al subir imagen:", error)
-      setUploadingImage(false)
-      toast({
-        title: "Error",
-        description: "No se pudo subir la imagen",
-        variant: "destructive"
-      })
-      return ""
-    }
+    const uploadPromises = files.map(async (file) => {
+      try {
+        const imageRef = storageRef(storage, `productos/${user.id}/${Date.now()}_${file.name}`)
+        const snapshot = await uploadStorageBytes(imageRef, file)
+        const downloadURL = await getStorageDownloadURL(snapshot.ref)
+        return downloadURL
+      } catch (error) {
+        console.error("Error al subir imagen:", error)
+        toast({
+          title: "Error",
+          description: `No se pudo subir ${file.name}`,
+          variant: "destructive"
+        })
+        return null
+      }
+    })
+
+    const urls = await Promise.all(uploadPromises)
+    setUploadingImage(false)
+    return urls.filter((url): url is string => url !== null)
   }
 
   const generarIdProducto = () => {
@@ -207,14 +225,12 @@ export default function ProductosTab({ proveedores }) {
       return
     }
 
-    let imagenURL = formData.imagen
+    let imagenesURLs = formData.imagenes || []
     
-    // Subir imagen si hay una nueva seleccionada
-    if (selectedImage) {
-      imagenURL = await handleImageUpload(selectedImage)
-      if (!imagenURL) {
-        return // Si falla la subida, no continuar
-      }
+    // Subir imágenes nuevas si hay alguna seleccionada
+    if (selectedImages.length > 0) {
+      const nuevasURLs = await handleImageUpload(selectedImages)
+      imagenesURLs = [...imagenesURLs, ...nuevasURLs]
     }
 
     const productId = editingProduct || generarIdProducto()
@@ -224,7 +240,8 @@ export default function ProductosTab({ proveedores }) {
       stock: Number.parseInt(formData.stock),
       stockMinimo: Number.parseInt(formData.stockMinimo),
       proveedor: formData.proveedor || null, // Guardar null si no hay proveedor
-      imagen: imagenURL || null, // Guardar null si no hay imagen
+      imagenes: imagenesURLs.length > 0 ? imagenesURLs : null, // Guardar array de imágenes o null
+      imagen: imagenesURLs[0] || null, // Mantener compatibilidad con campo imagen (primera imagen)
       activo: true, // Por defecto los productos están activos
       fechaCreacion: new Date().toISOString(),
       usuarioId: user.id,
@@ -258,11 +275,11 @@ export default function ProductosTab({ proveedores }) {
       // precioCompra: producto.precioCompra || producto.precio, // Eliminado
       precioVenta: producto.precioVenta || producto.precio, // Asegurarse de que se use este
       proveedor: producto.proveedor || "", // Asegurar que sea string vacío si no hay proveedor
-      imagen: producto.imagen || "", // Asegurar que la imagen esté presente
+      imagenes: producto.imagenes || (producto.imagen ? [producto.imagen] : []), // Convertir imagen única a array si es necesario
     }
     setFormData(productToEdit)
-    setImagePreview(producto.imagen || "")
-    setSelectedImage(null)
+    setImagePreviews(producto.imagenes || (producto.imagen ? [producto.imagen] : []))
+    setSelectedImages([])
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
@@ -443,40 +460,64 @@ export default function ProductosTab({ proveedores }) {
                     </div>
                   </div>
 
-                  {/* Campo de imagen */}
+                  {/* Campo de imágenes */}
                   <div>
-                    <Label htmlFor="imagen">Imagen del Producto (Opcional)</Label>
+                    <Label htmlFor="imagenes">Imágenes del Producto (Opcional)</Label>
                     <div className="space-y-2">
-                      {imagePreview && (
-                        <div className="relative w-full h-48 border rounded-lg overflow-hidden">
-                          <img
-                            src={imagePreview}
-                            alt="Vista previa"
-                            className="w-full h-full object-cover"
-                          />
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="sm"
-                            className="absolute top-2 right-2"
-                            onClick={() => {
-                              setImagePreview("")
-                              setSelectedImage(null)
-                              setFormData({ ...formData, imagen: "" })
-                              if (fileInputRef.current) {
-                                fileInputRef.current.value = ""
-                              }
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
+                      {(imagePreviews.length > 0 || formData.imagenes?.length > 0) && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {formData.imagenes?.map((img, index) => (
+                            <div key={`existing-${index}`} className="relative w-full h-32 border rounded-lg overflow-hidden">
+                              <img
+                                src={img}
+                                alt={`Imagen ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                className="absolute top-1 right-1 h-6 w-6 p-0"
+                                onClick={() => {
+                                  const newImagenes = formData.imagenes?.filter((_, i) => i !== index) || []
+                                  setFormData({ ...formData, imagenes: newImagenes })
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                          {imagePreviews.map((preview, index) => (
+                            <div key={`preview-${index}`} className="relative w-full h-32 border rounded-lg overflow-hidden">
+                              <img
+                                src={preview}
+                                alt={`Vista previa ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                className="absolute top-1 right-1 h-6 w-6 p-0"
+                                onClick={() => {
+                                  const newPreviews = imagePreviews.filter((_, i) => i !== index)
+                                  const newSelected = selectedImages.filter((_, i) => i !== index)
+                                  setImagePreviews(newPreviews)
+                                  setSelectedImages(newSelected)
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
                         </div>
                       )}
                       <div className="flex items-center gap-2">
                         <Input
-                          id="imagen"
+                          id="imagenes"
                           type="file"
                           accept="image/*"
+                          multiple
                           ref={fileInputRef}
                           onChange={handleImageSelect}
                           className="hidden"
@@ -496,13 +537,13 @@ export default function ProductosTab({ proveedores }) {
                           ) : (
                             <>
                               <Upload className="h-4 w-4 mr-2" />
-                              {imagePreview ? "Cambiar Imagen" : "Seleccionar Imagen"}
+                              Agregar Imágenes
                             </>
                           )}
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Formatos soportados: JPG, PNG, GIF. Tamaño máximo: 5MB
+                        Formatos soportados: JPG, PNG, GIF. Tamaño máximo: 5MB por imagen. Puedes seleccionar múltiples imágenes.
                       </p>
                     </div>
                   </div>
