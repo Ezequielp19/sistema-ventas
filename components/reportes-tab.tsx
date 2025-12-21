@@ -199,8 +199,8 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center gap-2">
               <div>
-                <CardTitle className="text-white">Reportes de Ventas</CardTitle>
-                <p className="text-blue-100">Análisis detallado de ventas y métricas</p>
+                <CardTitle className="text-white text-lg sm:text-xl">Reportes de Ventas</CardTitle>
+                <p className="text-blue-100 text-xs sm:text-sm">Análisis detallado de ventas y métricas</p>
               </div>
               <HelpTooltip
                 title="Ayuda - Reportes de Ventas"
@@ -311,15 +311,16 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
       {/* Gráfico de ventas por día */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center">
-            <Calendar className="h-5 w-5 mr-2" />
-            Ventas por Día - {meses[Number.parseInt(selectedMonth)]} {selectedYear}
+          <CardTitle className="flex items-center text-base sm:text-lg">
+            <Calendar className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+            <span className="hidden sm:inline">Ventas por Día - {meses[Number.parseInt(selectedMonth)]} {selectedYear}</span>
+            <span className="sm:hidden">Ventas por Día</span>
           </CardTitle>
-          <p className="text-sm text-muted-foreground mt-1">💡 Haz clic en los días con ventas para ver el detalle</p>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">💡 Haz clic en los días con ventas para ver el detalle</p>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            <div className="grid grid-cols-7 gap-2 text-center text-sm font-medium text-muted-foreground">
+          <div className="space-y-3 sm:space-y-4">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-xs sm:text-sm font-medium text-muted-foreground">
               <div>Dom</div>
               <div>Lun</div>
               <div>Mar</div>
@@ -329,12 +330,12 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
               <div>Sáb</div>
             </div>
 
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {/* Espacios vacíos para el primer día del mes */}
               {Array.from({
                 length: new Date(Number.parseInt(selectedYear), Number.parseInt(selectedMonth), 1).getDay(),
               }).map((_, i) => (
-                <div key={i} className="h-16 sm:h-20"></div>
+                <div key={i} className="h-14 sm:h-16 md:h-20"></div>
               ))}
 
               {/* Días del mes */}
@@ -342,7 +343,7 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
                 return (
                   <div
                     key={dia.dia}
-                    className={`h-16 sm:h-20 rounded-lg border-2 border-border p-1 sm:p-2 text-center transition-all ${
+                    className={`h-14 sm:h-16 md:h-20 rounded-lg border-2 border-border p-1 sm:p-2 text-center transition-all ${
                       dia.total > 0
                         ? "bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800 cursor-pointer hover:border-blue-400 dark:hover:border-blue-600 hover:shadow-md transform hover:scale-105"
                         : "bg-muted"
@@ -355,9 +356,9 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
                     <div className="font-bold text-xs sm:text-sm">{dia.dia}</div>
                     {dia.total > 0 && (
                       <>
-                        <div className="text-xs text-green-600 font-semibold">${dia.total.toFixed(0)}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {dia.cantidad} venta{dia.cantidad !== 1 ? "s" : ""}
+                        <div className="text-[10px] sm:text-xs text-green-600 font-semibold">${dia.total.toFixed(0)}</div>
+                        <div className="text-[10px] sm:text-xs text-muted-foreground">
+                          {dia.cantidad} v{dia.cantidad !== 1 ? "s" : ""}
                         </div>
                       </>
                     )}
@@ -452,17 +453,20 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
       {/* Tabla detallada de ventas con paginación */}
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>Detalle de Ventas del Período</CardTitle>
-            <ExportButtons 
-              data={ventasFiltradas} 
-              type="ventas" 
-              title="Reporte de Ventas"
-            />
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <CardTitle className="text-lg sm:text-xl">Detalle de Ventas del Período</CardTitle>
+            <div className="w-full sm:w-auto">
+              <ExportButtons 
+                data={ventasFiltradas} 
+                type="ventas" 
+                title="Reporte de Ventas"
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
+          {/* Vista Desktop - Tabla */}
+          <div className="hidden lg:block rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -520,6 +524,69 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
             </Table>
           </div>
 
+          {/* Vista Móvil - Cards */}
+          <div className="lg:hidden space-y-4">
+            {currentItems.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                No hay ventas en este período
+              </div>
+            ) : (
+              currentItems.map((venta) => (
+                <Card key={venta.id}>
+                  <CardContent className="p-4">
+                    <div className="space-y-3">
+                      {/* Header con fecha y total */}
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1">
+                          <div className="text-xs text-muted-foreground">
+                            {venta.fecha.toLocaleDateString()}
+                          </div>
+                          <h3 className="font-semibold text-base mt-1">{venta.cliente}</h3>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-bold">${venta.total?.toFixed(2)}</div>
+                        </div>
+                      </div>
+
+                      {/* Productos */}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Productos:</div>
+                        <div className="space-y-1">
+                          {venta.items?.map((item: any, index: number) => (
+                            <div key={index} className="text-sm">
+                              {item.nombre} x{item.cantidad}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Métodos de pago */}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Métodos de Pago:</div>
+                        <div className="flex flex-wrap gap-2">
+                          {venta.pagos ? (
+                            venta.pagos.map((pago: any, index: number) => (
+                              <div key={index} className="flex items-center space-x-1">
+                                <Badge variant="outline" className="capitalize text-xs">
+                                  {pago.metodo}
+                                </Badge>
+                                <span className="text-xs">${Number.parseFloat(pago.monto).toFixed(2)}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <Badge variant="outline" className="capitalize text-xs">
+                              {venta.metodoPago || "No especificado"}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+
           {/* Paginación */}
           {totalPages > 1 && (
             <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
@@ -529,16 +596,17 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
 
       {/* Modal para ventas del día */}
       <Dialog open={showDayModal} onOpenChange={setShowDayModal}>
-        <DialogContent className="max-w-[95vw] md:max-w-4xl lg:max-w-5xl xl:max-w-[90vw] 2xl:max-w-[85vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:w-[90vw] md:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle className="flex items-center">
-              <Calendar className="h-5 w-5 mr-2" />
-              Ventas del {selectedDay?.dia} de {meses[Number.parseInt(selectedMonth)]} {selectedYear}
+            <DialogTitle className="flex items-center text-base sm:text-lg">
+              <Calendar className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+              <span className="hidden sm:inline">Ventas del {selectedDay?.dia} de {meses[Number.parseInt(selectedMonth)]} {selectedYear}</span>
+              <span className="sm:hidden">Ventas del {selectedDay?.dia}</span>
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             {/* Resumen del día */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
               <Card className="bg-blue-50 dark:bg-blue-950">
                 <CardContent className="p-4">
                   <div className="text-center">
@@ -577,11 +645,11 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
 
             {/* Lista detallada de ventas */}
             <div className="space-y-3">
-              <h3 className="font-semibold text-lg">Detalle de Ventas</h3>
+              <h3 className="font-semibold text-base sm:text-lg">Detalle de Ventas</h3>
               {ventasDelDiaSeleccionado.map((venta, index) => (
                 <Card key={venta.id} className="border-l-4 border-l-blue-500">
-                  <CardContent className="p-4">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <CardContent className="p-3 sm:p-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
                       {/* Información básica */}
                       <div>
                         <div className="flex items-center justify-between mb-2">

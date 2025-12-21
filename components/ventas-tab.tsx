@@ -260,9 +260,9 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center gap-2">
-              <CardTitle>Nueva Venta</CardTitle>
+              <CardTitle className="text-lg sm:text-xl">Nueva Venta</CardTitle>
               <HelpTooltip
                 title="Ayuda - Gestión de Ventas"
                 content={
@@ -299,33 +299,34 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
             </div>
             <Dialog open={showDialog} onOpenChange={setShowDialog}>
               <DialogTrigger asChild>
-                <Button>
+                <Button className="w-full sm:w-auto">
                   <Plus className="h-4 w-4 mr-2" />
-                  Nueva Venta (F1)
+                  <span className="hidden sm:inline">Nueva Venta (F1)</span>
+                  <span className="sm:hidden">Nueva Venta</span>
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-[95vw] xl:max-w-[95vw] 2xl:max-w-[90vw] max-h-[90vh] overflow-y-auto">
+              <DialogContent className="w-[95vw] sm:w-[90vw] lg:max-w-[95vw] xl:max-w-[90vw] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
-                  <DialogTitle>Procesar Nueva Venta</DialogTitle>
+                  <DialogTitle className="text-lg sm:text-xl">Procesar Nueva Venta</DialogTitle>
                 </DialogHeader>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                   {/* Productos disponibles con filtros */}
-                  <div>
+                  <div className="order-1 lg:order-1">
                     <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-semibold">Productos Disponibles</h3>
-                      <Badge variant="outline">{filteredProducts.length} productos</Badge>
+                      <h3 className="font-semibold text-sm sm:text-base">Productos Disponibles</h3>
+                      <Badge variant="outline" className="text-xs">{filteredProducts.length} productos</Badge>
                     </div>
 
                     {/* Filtros */}
-                    <div className="space-y-3 mb-4 p-4 bg-muted rounded-lg">
+                    <div className="space-y-3 mb-4 p-3 sm:p-4 bg-muted rounded-lg">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                           <Filter className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">Filtros</span>
+                          <span className="text-xs sm:text-sm font-medium">Filtros</span>
                         </div>
-                        <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="h-8">
-                          <X className="h-4 w-4 mr-1" />
-                          Limpiar
+                        <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="h-7 sm:h-8 text-xs">
+                          <X className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                          <span className="hidden sm:inline">Limpiar</span>
                         </Button>
                       </div>
 
@@ -336,14 +337,14 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                           placeholder="Buscar por nombre o código..."
                           value={searchTerm}
                           onChange={(e) => setSearchTerm(e.target.value)}
-                          className="pl-8"
+                          className="pl-8 text-sm"
                         />
                       </div>
 
                       {/* Filtros por proveedor y tipo */}
-                      <div className="grid grid-cols-1 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <Select value={filterProveedor} onValueChange={setFilterProveedor}>
-                          <SelectTrigger>
+                          <SelectTrigger className="text-sm">
                             <SelectValue placeholder="Proveedor" />
                           </SelectTrigger>
                           <SelectContent>
@@ -357,7 +358,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                         </Select>
 
                         <Select value={filterTipo} onValueChange={setFilterTipo}>
-                          <SelectTrigger>
+                          <SelectTrigger className="text-sm">
                             <SelectValue placeholder="Tipo" />
                           </SelectTrigger>
                           <SelectContent>
@@ -373,27 +374,27 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                     </div>
 
                     {/* Lista de productos filtrados */}
-                    <div className="max-h-96 overflow-y-auto space-y-2">
+                    <div className="max-h-64 sm:max-h-96 overflow-y-auto space-y-2">
                       {filteredProducts.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground">
-                          <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p>No se encontraron productos</p>
-                          <p className="text-sm">Intenta ajustar los filtros</p>
+                        <div className="text-center py-6 sm:py-8 text-muted-foreground">
+                          <Search className="h-6 w-6 sm:h-8 sm:w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">No se encontraron productos</p>
+                          <p className="text-xs">Intenta ajustar los filtros</p>
                         </div>
                       ) : (
                         filteredProducts.map((producto) => (
                           <div
                             key={producto.id}
-                            className="flex justify-between items-center p-3 border border-border rounded-lg hover:bg-gray-50"
+                            className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 p-2 sm:p-3 border border-border rounded-lg hover:bg-gray-50"
                           >
-                            <div className="flex-1">
-                              <div className="font-medium">{producto.nombre}</div>
-                              <div className="text-sm text-muted-foreground">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm sm:text-base truncate">{producto.nombre}</div>
+                              <div className="text-xs sm:text-sm text-muted-foreground">
                                 <span className="font-mono">{producto.codigo}</span> • $
                                 {producto.precioVenta?.toFixed(2) || producto.precio?.toFixed(2)} • Stock:{" "}
                                 {producto.stock}
                               </div>
-                              <div className="flex space-x-2 mt-1">
+                              <div className="flex flex-wrap gap-1 sm:gap-2 mt-1">
                                 {producto.tipo && (
                                   <Badge variant="secondary" className="text-xs">
                                     {producto.tipo}
@@ -406,7 +407,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                                 )}
                               </div>
                             </div>
-                            <Button size="sm" onClick={() => agregarAlCarrito(producto.id)}>
+                            <Button size="sm" onClick={() => agregarAlCarrito(producto.id)} className="w-full sm:w-auto">
                               Agregar
                             </Button>
                           </div>
@@ -416,51 +417,52 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                   </div>
 
                   {/* Carrito */}
-                  <div>
+                  <div className="order-2 lg:order-2">
                     <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-semibold">Carrito de Compras</h3>
-                      <Badge variant="outline">{carrito.length} items</Badge>
+                      <h3 className="font-semibold text-sm sm:text-base">Carrito de Compras</h3>
+                      <Badge variant="outline" className="text-xs">{carrito.length} items</Badge>
                     </div>
                     <div className="space-y-4">
                       <div>
-                        <Label htmlFor="cliente">Cliente</Label>
+                        <Label htmlFor="cliente" className="text-sm">Cliente</Label>
                         <Input
                           id="cliente"
                           value={cliente}
                           onChange={(e) => setCliente(e.target.value)}
                           placeholder="Nombre del cliente"
+                          className="text-sm"
                         />
                       </div>
 
                       <div className="max-h-48 overflow-y-auto">
                         {carrito.length === 0 ? (
-                          <div className="text-center py-8 text-muted-foreground">
-                            <div className="text-4xl mb-2">🛒</div>
-                            <p>Carrito vacío</p>
-                            <p className="text-sm">Agrega productos para comenzar</p>
+                          <div className="text-center py-6 sm:py-8 text-muted-foreground">
+                            <div className="text-3xl sm:text-4xl mb-2">🛒</div>
+                            <p className="text-sm">Carrito vacío</p>
+                            <p className="text-xs">Agrega productos para comenzar</p>
                           </div>
                         ) : (
                           carrito.map((item) => (
                             <div
                               key={item.id}
-                              className="flex justify-between items-center p-2 border border-border rounded mb-2"
+                              className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 p-2 border border-border rounded mb-2"
                             >
-                              <div className="flex-1">
-                                <div className="font-medium">{item.nombre}</div>
-                                <div className="text-sm text-muted-foreground">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm sm:text-base truncate">{item.nombre}</div>
+                                <div className="text-xs sm:text-sm text-muted-foreground">
                                   ${item.precio} x {item.cantidad} = ${(item.precio * item.cantidad).toFixed(2)}
                                 </div>
                               </div>
-                              <div className="flex items-center space-x-2">
+                              <div className="flex items-center space-x-2 w-full sm:w-auto">
                                 <Input
                                   type="number"
                                   min="1"
                                   max={item.stockDisponible}
                                   value={item.cantidad}
                                   onChange={(e) => actualizarCantidad(item.id, Number.parseInt(e.target.value))}
-                                  className="w-16"
+                                  className="w-20 sm:w-16 text-sm"
                                 />
-                                <Button size="sm" variant="outline" onClick={() => removerDelCarrito(item.id)}>
+                                <Button size="sm" variant="outline" onClick={() => removerDelCarrito(item.id)} className="flex-1 sm:flex-none">
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
@@ -470,44 +472,45 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                       </div>
 
                       <div className="border-t border-border pt-4">
-                        <div className="text-xl font-bold">Total: ${calcularTotal().toFixed(2)}</div>
+                        <div className="text-lg sm:text-xl font-bold">Total: ${calcularTotal().toFixed(2)}</div>
                       </div>
                     </div>
                   </div>
 
                   {/* Métodos de Pago Múltiples */}
-                  <div>
+                  <div className="order-3 lg:order-3">
                     <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-semibold flex items-center">
+                      <h3 className="font-semibold flex items-center text-sm sm:text-base">
                         <CreditCard className="h-4 w-4 mr-2" />
                         Métodos de Pago
                       </h3>
-                      <Button size="sm" onClick={agregarPago} variant="outline">
-                        <Plus className="h-4 w-4 mr-1" />
-                        Agregar Pago
+                      <Button size="sm" onClick={agregarPago} variant="outline" className="text-xs sm:text-sm">
+                        <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                        <span className="hidden sm:inline">Agregar Pago</span>
+                        <span className="sm:hidden">Agregar</span>
                       </Button>
                     </div>
 
                     <div className="space-y-4">
                       {pagos.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground border-2 border-dashed border-border rounded-lg">
-                          <CreditCard className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p>Sin métodos de pago</p>
-                          <p className="text-sm">Agrega al menos un método</p>
+                        <div className="text-center py-6 sm:py-8 text-muted-foreground border-2 border-dashed border-border rounded-lg">
+                          <CreditCard className="h-6 w-6 sm:h-8 sm:w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">Sin métodos de pago</p>
+                          <p className="text-xs">Agrega al menos un método</p>
                         </div>
                       ) : (
                         <div className="max-h-48 overflow-y-auto space-y-3">
                           {pagos.map((pago, index) => (
-                            <div key={index} className="p-3 border border-border rounded-lg bg-muted">
+                            <div key={index} className="p-2 sm:p-3 border border-border rounded-lg bg-muted">
                               <div className="flex justify-between items-start mb-2">
-                                <span className="text-sm font-medium">Pago #{index + 1}</span>
+                                <span className="text-xs sm:text-sm font-medium">Pago #{index + 1}</span>
                                 <Button
                                   size="sm"
                                   variant="ghost"
                                   onClick={() => removerPago(index)}
                                   className="h-6 w-6 p-0"
                                 >
-                                  <X className="h-4 w-4" />
+                                  <X className="h-3 w-3 sm:h-4 sm:w-4" />
                                 </Button>
                               </div>
                               <div className="space-y-2">
@@ -515,7 +518,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                                   value={pago.metodo}
                                   onValueChange={(value) => actualizarPago(index, "metodo", value)}
                                 >
-                                  <SelectTrigger>
+                                  <SelectTrigger className="text-sm">
                                     <SelectValue placeholder="Método de pago" />
                                   </SelectTrigger>
                                   <SelectContent>
@@ -532,6 +535,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                                   placeholder="Monto"
                                   value={pago.monto}
                                   onChange={(e) => actualizarPago(index, "monto", e.target.value)}
+                                  className="text-sm"
                                 />
                               </div>
                             </div>
@@ -541,11 +545,11 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
 
                       {/* Resumen de pagos */}
                       <div className="border-t border-border pt-4 space-y-2">
-                        <div className="flex justify-between text-sm">
+                        <div className="flex justify-between text-xs sm:text-sm">
                           <span>Total de la venta:</span>
                           <span className="font-bold">${calcularTotal().toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between text-sm">
+                        <div className="flex justify-between text-xs sm:text-sm">
                           <span>Total pagado:</span>
                           <span
                             className={`font-bold ${Math.abs(calcularTotal() - calcularTotalPagos()) < 0.01 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
@@ -553,7 +557,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                             ${calcularTotalPagos().toFixed(2)}
                           </span>
                         </div>
-                        <div className="flex justify-between text-sm">
+                        <div className="flex justify-between text-xs sm:text-sm">
                           <span>Diferencia:</span>
                           <span
                             className={`font-bold ${Math.abs(calcularTotal() - calcularTotalPagos()) < 0.01 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
@@ -564,7 +568,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
 
                         {Math.abs(calcularTotal() - calcularTotalPagos()) < 0.01 && pagos.length > 0 && (
                           <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded p-2 text-center">
-                            <span className="text-green-800 dark:text-green-200 text-sm font-medium">
+                            <span className="text-green-800 dark:text-green-200 text-xs sm:text-sm font-medium">
                               ✅ Pagos balanceados
                             </span>
                           </div>
@@ -572,7 +576,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
 
                         <Button
                           onClick={procesarVenta}
-                          className="w-full mt-4"
+                          className="w-full mt-4 text-sm sm:text-base"
                           disabled={
                             carrito.length === 0 ||
                             !cliente ||
@@ -594,17 +598,20 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
 
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>Historial de Ventas</CardTitle>
-            <ExportButtons 
-              data={ventasArray} 
-              type="ventas" 
-              title="Historial de Ventas"
-            />
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <CardTitle className="text-lg sm:text-xl">Historial de Ventas</CardTitle>
+            <div className="w-full sm:w-auto">
+              <ExportButtons 
+                data={ventasArray} 
+                type="ventas" 
+                title="Historial de Ventas"
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border border-border">
+          {/* Vista Desktop - Tabla */}
+          <div className="hidden lg:block rounded-md border border-border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -671,6 +678,82 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                 )}
               </TableBody>
             </Table>
+          </div>
+
+          {/* Vista Móvil - Cards */}
+          <div className="lg:hidden space-y-4">
+            {currentItems.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                No se encontraron ventas
+              </div>
+            ) : (
+              currentItems.map((venta) => (
+                <Card key={venta.id}>
+                  <CardContent className="p-4">
+                    <div className="space-y-3">
+                      {/* Header con fecha y total */}
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1">
+                          <div className="text-xs text-muted-foreground">
+                            {new Date(venta.fecha).toLocaleDateString()}
+                          </div>
+                          <h3 className="font-semibold text-base mt-1">{venta.cliente}</h3>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-bold">${venta.total?.toFixed(2)}</div>
+                        </div>
+                      </div>
+
+                      {/* Productos */}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Productos:</div>
+                        <div className="space-y-1">
+                          {venta.items?.map((item: any, index: number) => (
+                            <div key={index} className="text-sm">
+                              {item.nombre} x{item.cantidad}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Métodos de pago */}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Métodos de Pago:</div>
+                        <div className="flex flex-wrap gap-2">
+                          {venta.pagos ? (
+                            venta.pagos.map((pago: any, index: number) => (
+                              <div key={index} className="flex items-center space-x-1">
+                                <Badge variant="outline" className="capitalize text-xs">
+                                  {pago.metodo}
+                                </Badge>
+                                <span className="text-xs">${Number.parseFloat(pago.monto).toFixed(2)}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <Badge variant="outline" className="capitalize text-xs">
+                              {venta.metodoPago || "No especificado"}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Acciones */}
+                      <div className="pt-2 border-t">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => eliminarVenta(venta.id, venta)}
+                          className="w-full text-red-600 dark:text-red-400 hover:text-red-700 hover:border-red-300"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Eliminar Venta
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
           </div>
 
           {/* Paginación */}

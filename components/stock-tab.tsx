@@ -97,9 +97,10 @@ export default function StockTab({ productos, stockBajo }) {
         <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
           <CardHeader className="pb-3">
             <div className="flex justify-between items-center">
-              <CardTitle className="text-red-800 dark:text-red-200 flex items-center">
-                <Package className="h-5 w-5 mr-2" />
-                Productos con Stock Bajo ({stockBajo.length})
+              <CardTitle className="text-red-800 dark:text-red-200 flex items-center text-sm sm:text-base">
+                <Package className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
+                <span className="hidden sm:inline">Productos con Stock Bajo ({stockBajo.length})</span>
+                <span className="sm:hidden">Stock Bajo ({stockBajo.length})</span>
               </CardTitle>
               <Button
                 variant="ghost"
@@ -113,12 +114,12 @@ export default function StockTab({ productos, stockBajo }) {
           </CardHeader>
           {!stockAlertsMinimized && (
             <CardContent>
-              <div className="grid gap-4">
+              <div className="grid gap-3 sm:gap-4">
                 {stockBajo.map((producto) => (
-                  <div key={producto.id} className="flex justify-between items-center p-4 bg-card rounded border">
-                    <div>
-                      <h3 className="font-semibold">{producto.nombre}</h3>
-                      <p className="text-sm text-muted-foreground">
+                  <div key={producto.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-3 sm:p-4 bg-card rounded border">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-sm sm:text-base truncate">{producto.nombre}</h3>
+                      <p className="text-xs sm:text-sm text-muted-foreground">
                         Stock actual: {producto.stock} | Mínimo: {producto.stockMinimo}
                       </p>
                     </div>
@@ -127,6 +128,7 @@ export default function StockTab({ productos, stockBajo }) {
                         setSelectedProduct(producto.id)
                         setShowDialog(true)
                       }}
+                      className="w-full sm:w-auto text-sm"
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       Reponer Stock
@@ -142,9 +144,9 @@ export default function StockTab({ productos, stockBajo }) {
       {/* Control de Stock General */}
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center gap-2">
-              <CardTitle>Control de Stock General</CardTitle>
+              <CardTitle className="text-lg sm:text-xl">Control de Stock General</CardTitle>
               <HelpTooltip
                 title="Ayuda - Control de Stock"
                 content={
@@ -215,7 +217,8 @@ export default function StockTab({ productos, stockBajo }) {
             </div>
           </div>
 
-          <div className="rounded-md border">
+          {/* Vista Desktop - Tabla */}
+          <div className="hidden lg:block rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -270,6 +273,69 @@ export default function StockTab({ productos, stockBajo }) {
             </Table>
           </div>
 
+          {/* Vista Móvil - Cards */}
+          <div className="lg:hidden space-y-4">
+            {currentItems.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                No se encontraron productos
+              </div>
+            ) : (
+              currentItems.map((producto) => (
+                <Card key={producto.id}>
+                  <CardContent className="p-4">
+                    <div className="space-y-3">
+                      {/* Header con nombre y estado */}
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-base truncate">{producto.nombre}</h3>
+                        </div>
+                        <div>
+                          {producto.stock === 0 ? (
+                            <Badge variant="destructive" className="text-xs">Sin Stock</Badge>
+                          ) : producto.stock <= producto.stockMinimo ? (
+                            <Badge variant="destructive" className="text-xs">Stock Bajo</Badge>
+                          ) : producto.stock <= producto.stockMinimo * 2 ? (
+                            <Badge variant="secondary" className="text-xs">Stock Medio</Badge>
+                          ) : (
+                            <Badge variant="default" className="text-xs">Stock Bueno</Badge>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Información de stock */}
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Stock Actual:</span>
+                          <p className="font-medium">{producto.stock}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Stock Mínimo:</span>
+                          <p className="font-medium">{producto.stockMinimo}</p>
+                        </div>
+                      </div>
+                      
+                      {/* Acciones */}
+                      <div className="pt-2 border-t">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedProduct(producto.id)
+                            setShowDialog(true)
+                          }}
+                          className="w-full"
+                        >
+                          <Package className="h-4 w-4 mr-2" />
+                          Reponer Stock
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+
           {/* Paginación */}
           {totalPages > 1 && (
             <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
@@ -279,14 +345,14 @@ export default function StockTab({ productos, stockBajo }) {
 
       {/* Dialog para agregar stock */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[95vw] sm:w-full max-w-md">
           <DialogHeader>
-            <DialogTitle>Reponer Stock</DialogTitle>
+            <DialogTitle className="text-lg sm:text-xl">Reponer Stock</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             {selectedProduct && (
               <>
-                <div>
+                <div className="space-y-2 text-sm sm:text-base">
                   <p>
                     <strong>Producto:</strong> {productos[selectedProduct]?.nombre}
                   </p>
@@ -298,7 +364,7 @@ export default function StockTab({ productos, stockBajo }) {
                   </p>
                 </div>
                 <div>
-                  <Label htmlFor="cantidad">Cantidad a agregar</Label>
+                  <Label htmlFor="cantidad" className="text-sm">Cantidad a agregar</Label>
                   <Input
                     id="cantidad"
                     type="number"
@@ -306,21 +372,22 @@ export default function StockTab({ productos, stockBajo }) {
                     value={cantidadAgregar}
                     onChange={(e) => setCantidadAgregar(e.target.value)}
                     placeholder="Ingrese la cantidad"
+                    className="text-base"
                   />
                 </div>
                 {cantidadAgregar && (
-                  <div className="p-4 bg-muted rounded">
-                    <p>
+                  <div className="p-3 sm:p-4 bg-muted rounded">
+                    <p className="text-sm sm:text-base">
                       <strong>Nuevo stock:</strong>{" "}
                       {productos[selectedProduct]?.stock + Number.parseInt(cantidadAgregar || 0)}
                     </p>
                   </div>
                 )}
-                <div className="flex space-x-2">
-                  <Button onClick={handleAddStock} className="flex-1">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button onClick={handleAddStock} className="flex-1 w-full sm:w-auto">
                     Confirmar Reposición
                   </Button>
-                  <Button variant="outline" onClick={() => setShowDialog(false)}>
+                  <Button variant="outline" onClick={() => setShowDialog(false)} className="w-full sm:w-auto">
                     Cancelar
                   </Button>
                 </div>
