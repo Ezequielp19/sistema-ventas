@@ -312,9 +312,9 @@ export default function ProductosTab({ proveedores }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-center gap-2">
-            <CardTitle>Gestión de Productos</CardTitle>
+            <CardTitle className="text-lg sm:text-xl">Gestión de Productos</CardTitle>
             <HelpTooltip
               title="Ayuda - Gestión de Productos"
               content={
@@ -348,27 +348,37 @@ export default function ProductosTab({ proveedores }) {
               }
             />
           </div>
-          <div className="flex items-center space-x-2">
-            <ExportButtons 
-              data={productosArray} 
-              type="productos" 
-              title="Catálogo de Productos"
-            />
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            <div className="block sm:hidden w-full">
+              <ExportButtons 
+                data={productosArray} 
+                type="productos" 
+                title="Catálogo de Productos"
+              />
+            </div>
+            <div className="hidden sm:block">
+              <ExportButtons 
+                data={productosArray} 
+                type="productos" 
+                title="Catálogo de Productos"
+              />
+            </div>
             <Dialog open={showDialog} onOpenChange={setShowDialog}>
               <DialogTrigger asChild>
-                <Button onClick={resetForm}>
+                <Button onClick={resetForm} className="w-full sm:w-auto">
                   <Plus className="h-4 w-4 mr-2" />
-                  Nuevo Producto
+                  <span className="hidden sm:inline">Nuevo Producto</span>
+                  <span className="sm:hidden">Nuevo</span>
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto w-[95vw] sm:w-full">
                 <DialogHeader>
                   <DialogTitle>
                     {editingProduct ? "Editar Producto" : "Nuevo Producto"}
                   </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="codigo">Código</Label>
                       <Input
@@ -398,7 +408,7 @@ export default function ProductosTab({ proveedores }) {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="tipo">Tipo</Label>
                       <Input
@@ -426,7 +436,7 @@ export default function ProductosTab({ proveedores }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <Label htmlFor="precioVenta">Precio Venta</Label>
                       <Input
@@ -612,8 +622,8 @@ export default function ProductosTab({ proveedores }) {
           </div>
         </div>
 
-        {/* Tabla de productos */}
-        <div className="rounded-md border">
+        {/* Vista Desktop - Tabla */}
+        <div className="hidden lg:block rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -622,7 +632,6 @@ export default function ProductosTab({ proveedores }) {
                 <TableHead>Nombre</TableHead>
                 <TableHead>Tipo</TableHead>
                 <TableHead>Proveedor</TableHead>
-                {/* Eliminado Precio Compra de la tabla */}
                 <TableHead>Precio Venta</TableHead>
                 <TableHead>Stock</TableHead>
                 <TableHead>Estado</TableHead>
@@ -658,7 +667,6 @@ export default function ProductosTab({ proveedores }) {
                     <TableCell className="font-medium">{producto.nombre}</TableCell>
                     <TableCell>{producto.tipo}</TableCell>
                     <TableCell>{proveedores[producto.proveedor]?.nombre || "Sin proveedor"}</TableCell>
-                    {/* Eliminado Precio Compra de la tabla */}
                     <TableCell>${producto.precioVenta?.toFixed(2) || producto.precio?.toFixed(2)}</TableCell>
                     <TableCell>{producto.stock}</TableCell>
                     <TableCell>
@@ -683,6 +691,98 @@ export default function ProductosTab({ proveedores }) {
               )}
             </TableBody>
           </Table>
+        </div>
+
+        {/* Vista Móvil - Cards */}
+        <div className="lg:hidden space-y-4">
+          {currentItems.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              No se encontraron productos
+            </div>
+          ) : (
+            currentItems.map((producto) => (
+              <Card key={producto.id} className="overflow-hidden">
+                <CardContent className="p-4">
+                  <div className="flex gap-4">
+                    {/* Imagen */}
+                    <div className="flex-shrink-0">
+                      {producto.imagen ? (
+                        <div className="w-20 h-20 rounded overflow-hidden border">
+                          <img
+                            src={producto.imagen}
+                            alt={producto.nombre}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-20 h-20 rounded border flex items-center justify-center bg-muted">
+                          <Image className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Información */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-base truncate">{producto.nombre}</h3>
+                          <p className="text-xs text-muted-foreground font-mono">{producto.codigo}</p>
+                        </div>
+                        <div className="flex-shrink-0">
+                          {producto.stock <= producto.stockMinimo ? (
+                            <Badge variant="destructive" className="text-xs">Stock Bajo</Badge>
+                          ) : (
+                            <Badge variant="default" className="text-xs">Disponible</Badge>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                        <div>
+                          <span className="text-muted-foreground">Tipo:</span>
+                          <p className="font-medium">{producto.tipo}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Proveedor:</span>
+                          <p className="font-medium truncate">{proveedores[producto.proveedor]?.nombre || "Sin proveedor"}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Precio:</span>
+                          <p className="font-medium">${producto.precioVenta?.toFixed(2) || producto.precio?.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Stock:</span>
+                          <p className="font-medium">{producto.stock}</p>
+                        </div>
+                      </div>
+                      
+                      {/* Acciones */}
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => handleEdit(producto.id, producto)}
+                          className="flex-1"
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Editar
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => handleDelete(producto.id)}
+                          className="flex-1"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Eliminar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
 
         {/* Paginación */}

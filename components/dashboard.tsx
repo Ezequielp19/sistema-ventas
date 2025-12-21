@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { LogOut, Package, Users, ShoppingCart, AlertTriangle, Menu, ChevronDown, ChevronUp, Building, FileText, Store } from "lucide-react"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { Sheet, SheetContent, SheetTrigger, SheetClose } from "@/components/ui/sheet"
 import { ThemeToggle } from "@/components/theme-toggle"
 import ProductosTab from "@/components/productos-tab"
 import ProveedoresTab from "@/components/proveedores-tab"
@@ -110,72 +110,131 @@ export default function Dashboard({ user, onLogout }) {
     }
   }, [productos, proveedores, ventas])
 
-  const TabsNavigation = ({ isMobile = false }) => (
-    <TabsList className={`${isMobile ? "grid grid-cols-2 gap-1 h-auto" : "grid w-full grid-cols-8"}`}>
-      <TabsTrigger
-        value="productos"
-        className={`${isMobile ? "text-xs p-2" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Productos</span>
-        <span className={`${isMobile ? "hidden" : "sm:hidden"}`}>F3</span>
-      </TabsTrigger>
-      <TabsTrigger
-        value="proveedores"
-        className={`${isMobile ? "text-xs p-2" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Proveedores</span>
-        <span className={`${isMobile ? "hidden" : "sm:hidden"}`}>F2</span>
-      </TabsTrigger>
-      <TabsTrigger
-        value="ventas"
-        className={`${isMobile ? "text-xs p-2" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Ventas</span>
-        <span className={`${isMobile ? "hidden" : "sm:hidden"}`}>F1</span>
-      </TabsTrigger>
-      <TabsTrigger
-        value="tienda"
-        className={`${isMobile ? "text-xs p-2" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <Store className="h-4 w-4 mr-1" />
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Mi Tienda</span>
-      </TabsTrigger>
-      <TabsTrigger
-        value="stock"
-        className={`${isMobile ? "block" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Stock</span>
-      </TabsTrigger>
-      <TabsTrigger
-        value="reportes"
-        className={`${isMobile ? "text-xs p-2" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Reportes</span>
-        <span className={`${isMobile ? "hidden" : "sm:hidden"}`}>F7</span>
-      </TabsTrigger>
-      <TabsTrigger
-        value="personalizados"
-        className={`${isMobile ? "text-xs p-2" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Personalizados</span>
-      </TabsTrigger>
-      <TabsTrigger
-        value="facturacion"
-        className={`${isMobile ? "text-xs p-2" : ""}`}
-        onClick={() => isMobile && setIsMobileMenuOpen(false)}
-      >
-        <span className={`${isMobile ? "block" : "hidden sm:inline"}`}>Facturación</span>
-        <span className={`${isMobile ? "hidden" : "sm:hidden"}`}>F8</span>
-      </TabsTrigger>
-    </TabsList>
-  )
+  const TabsNavigation = ({ isMobile = false }) => {
+    const handleTabClick = (value: string) => {
+      setActiveTab(value)
+      if (isMobile) {
+        setIsMobileMenuOpen(false)
+      }
+    }
+
+    if (isMobile) {
+      // En móvil, usar botones simples en lugar de TabsTrigger
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "productos" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("productos")}
+            >
+              Productos
+            </Button>
+          </SheetClose>
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "proveedores" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("proveedores")}
+            >
+              Proveedores
+            </Button>
+          </SheetClose>
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "ventas" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("ventas")}
+            >
+              Ventas
+            </Button>
+          </SheetClose>
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "tienda" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("tienda")}
+            >
+              <Store className="h-4 w-4 mr-2" />
+              Mi Tienda
+            </Button>
+          </SheetClose>
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "stock" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("stock")}
+            >
+              Stock
+            </Button>
+          </SheetClose>
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "reportes" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("reportes")}
+            >
+              Reportes
+            </Button>
+          </SheetClose>
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "personalizados" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("personalizados")}
+            >
+              Personalizados
+            </Button>
+          </SheetClose>
+          <SheetClose asChild>
+            <Button
+              variant={activeTab === "facturacion" ? "default" : "outline"}
+              className="w-full justify-start"
+              onClick={() => handleTabClick("facturacion")}
+            >
+              Facturación
+            </Button>
+          </SheetClose>
+        </div>
+      )
+    }
+
+    // En desktop, usar TabsTrigger normal
+    return (
+      <TabsList className="grid w-full grid-cols-8">
+        <TabsTrigger value="productos">
+          <span className="hidden sm:inline">Productos</span>
+          <span className="sm:hidden">F3</span>
+        </TabsTrigger>
+        <TabsTrigger value="proveedores">
+          <span className="hidden sm:inline">Proveedores</span>
+          <span className="sm:hidden">F2</span>
+        </TabsTrigger>
+        <TabsTrigger value="ventas">
+          <span className="hidden sm:inline">Ventas</span>
+          <span className="sm:hidden">F1</span>
+        </TabsTrigger>
+        <TabsTrigger value="tienda">
+          <Store className="h-4 w-4 mr-1" />
+          <span className="hidden sm:inline">Mi Tienda</span>
+        </TabsTrigger>
+        <TabsTrigger value="stock">
+          <span className="hidden sm:inline">Stock</span>
+        </TabsTrigger>
+        <TabsTrigger value="reportes">
+          <span className="hidden sm:inline">Reportes</span>
+          <span className="sm:hidden">F7</span>
+        </TabsTrigger>
+        <TabsTrigger value="personalizados">
+          <span className="hidden sm:inline">Personalizados</span>
+        </TabsTrigger>
+        <TabsTrigger value="facturacion">
+          <span className="hidden sm:inline">Facturación</span>
+          <span className="sm:hidden">F8</span>
+        </TabsTrigger>
+      </TabsList>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-background">
