@@ -20,6 +20,7 @@ import FacturacionTab from "@/components/facturacion-tab"
 import TiendaTab from "@/components/tienda-tab"
 import DataMigration from "@/components/data-migration"
 import { useOptimizedRealtimeData } from "@/hooks/useOptimizedQueries"
+import { mergePublicCatalogCollections } from "@/lib/product-sync"
 
 export default function Dashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState("productos")
@@ -31,6 +32,7 @@ export default function Dashboard({ user, onLogout }) {
 
   // Usar consultas optimizadas con filtro por usuario
   const { data: productos, loading: productosLoading } = useOptimizedRealtimeData(`usuarios/${user?.id}/productos`)
+  const { data: tiendaProductos, loading: tiendaProductosLoading } = useOptimizedRealtimeData(`tiendas/${user?.id}/productos`)
   const { data: proveedores, loading: proveedoresLoading } = useOptimizedRealtimeData(`usuarios/${user?.id}/proveedores`)
   const { data: ventas, loading: ventasLoading } = useOptimizedRealtimeData(`usuarios/${user?.id}/ventas`)
 
@@ -94,8 +96,13 @@ export default function Dashboard({ user, onLogout }) {
   }, [])
 
   // Cálculos optimizados con useMemo
+  const productosParaVista = useMemo(
+    () => mergePublicCatalogCollections(productos || {}, tiendaProductos || {}),
+    [productos, tiendaProductos],
+  )
+
   const { totalProductos, totalProveedores, totalVentas, stockBajo } = useMemo(() => {
-    const productosArray = Object.entries(productos || {}).map(([id, producto]) => ({
+    const productosArray = Object.entries(productosParaVista || {}).map(([id, producto]) => ({
       id,
       ...producto,
     }))
@@ -103,12 +110,12 @@ export default function Dashboard({ user, onLogout }) {
     const stockBajoItems = productosArray.filter((p) => p.stock <= p.stockMinimo)
     
     return {
-      totalProductos: Object.keys(productos || {}).length,
+      totalProductos: Object.keys(productosParaVista || {}).length,
       totalProveedores: Object.keys(proveedores || {}).length,
       totalVentas: Object.values(ventas || {}).reduce((sum, venta) => sum + (venta.total || 0), 0),
       stockBajo: stockBajoItems
     }
-  }, [productos, proveedores, ventas])
+  }, [productosParaVista, proveedores, ventas])
 
   const TabsNavigation = ({ isMobile = false }) => {
     const handleTabClick = (value: string) => {
@@ -451,16 +458,16 @@ export default function Dashboard({ user, onLogout }) {
           </div>
 
           <TabsContent value="productos">
-            <ProductosTab productos={productos} proveedores={proveedores} />
+            <ProductosTab productos={productosParaVista} proveedores={proveedores} />
           </TabsContent>
 
           <TabsContent value="proveedores">
-            <ProveedoresTab proveedores={proveedores} productos={productos} />
+            <ProveedoresTab proveedores={proveedores} productos={productosParaVista} />
           </TabsContent>
 
           <TabsContent value="ventas">
             <VentasTab
-              productos={productos}
+              productos={productosParaVista}
               ventas={ventas}
               proveedores={proveedores}
               triggerNewSale={triggerNewSale}
@@ -468,23 +475,23 @@ export default function Dashboard({ user, onLogout }) {
           </TabsContent>
 
                   <TabsContent value="tienda">
-          <TiendaTab productos={productos} user={user} />
+          <TiendaTab productos={productosParaVista} user={user} />
         </TabsContent>
 
           <TabsContent value="stock">
-            <StockTab productos={productos} stockBajo={stockBajo} />
+            <StockTab productos={productosParaVista} stockBajo={stockBajo} />
           </TabsContent>
 
           <TabsContent value="reportes">
-            <ReportesTab ventas={ventas} productos={productos} proveedores={proveedores} />
+            <ReportesTab ventas={ventas} productos={productosParaVista} proveedores={proveedores} />
           </TabsContent>
 
           <TabsContent value="personalizados">
-            <CustomReports ventas={ventas} productos={productos} proveedores={proveedores} />
+            <CustomReports ventas={ventas} productos={productosParaVista} proveedores={proveedores} />
           </TabsContent>
 
           <TabsContent value="facturacion">
-            <FacturacionTab ventas={ventas} productos={productos} proveedores={proveedores} />
+            <FacturacionTab ventas={ventas} productos={productosParaVista} proveedores={proveedores} />
           </TabsContent>
         </Tabs>
       </main>

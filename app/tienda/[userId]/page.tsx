@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useEffect } from "react"
 import { use } from "react"
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Pagination } from "@/components/ui/pagination"
 import { useClient } from "@/hooks/use-client"
 import { ClientOnly } from "@/components/client-only"
+import { mergePublicCatalogCollections } from "@/lib/product-sync"
 
 interface Producto {
   id?: string
@@ -28,6 +29,7 @@ interface Producto {
   imagenes?: string[]
   destacado?: boolean
   activo?: boolean
+  visibleEnTienda?: boolean
 }
 
 interface TiendaConfig {
@@ -81,22 +83,22 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
       setLoading(true)
       try {
         const configRef = ref(database, `tiendas/${userId}/config`)
-        const productosRef = ref(database, `tiendas/${userId}/productos`)
+        const inventoryProductosRef = ref(database, `usuarios/${userId}/productos`)
+        const storeProductosRef = ref(database, `tiendas/${userId}/productos`)
 
-        const [configSnapshot, productosSnapshot] = await Promise.all([
+        const [configSnapshot, inventorySnapshot, storeSnapshot] = await Promise.all([
           get(configRef),
-          get(productosRef)
+          get(inventoryProductosRef),
+          get(storeProductosRef)
         ]);
 
         if (configSnapshot.exists()) {
           setTiendaConfig(configSnapshot.val())
         }
 
-        if (productosSnapshot.exists()) {
-          setProductos(productosSnapshot.val())
-        } else {
-          setProductos({})
-        }
+        const inventoryProducts = inventorySnapshot.exists() ? inventorySnapshot.val() : {}
+        const storeProducts = storeSnapshot.exists() ? storeSnapshot.val() : {}
+        setProductos(mergePublicCatalogCollections(inventoryProducts, storeProducts))
       } catch (error) {
         console.error("Error al cargar la tienda:", error)
         setProductos({})
@@ -122,6 +124,8 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
       activo: producto.activo !== false
     }))
     .filter(producto => {
+      if (producto.visibleEnTienda === false) return false
+
       // Filtrar productos activos con stock > 0
       const isActive = producto.activo !== false && producto.stock > 0
       if (!isActive) return false

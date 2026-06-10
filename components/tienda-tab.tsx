@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useEffect, useRef } from "react"
 import { ref, push, set, remove, onValue, off, get } from "firebase/database"
@@ -29,10 +29,13 @@ interface Producto {
   stock: number
   categoria: string
   imagen: string
+  imagenes?: string[]
   destacado: boolean
   activo: boolean
+  visibleEnTienda?: boolean
   fechaCreacion?: string
   tiendaId?: string
+  usuarioId?: string
 }
 
 interface User {
@@ -54,7 +57,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState("")
   const [showShareDialog, setShowShareDialog] = useState(false)
-  const [selectedProductForShare, setSelectedProductForShare] = useState(null)
+  const [selectedProductForShare, setSelectedProductForShare] = useState<Producto | null>(null)
   const [tiendaConfig, setTiendaConfig] = useState({
     nombre: "Mi Tienda",
     descripcion: "Los mejores productos al mejor precio",
@@ -65,16 +68,17 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     logo: ""
   })
   
-  const fileInputRef = useRef(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const { toast } = useToast()
   const itemsPerPage = 12
+  const userId = user?.uid || user?.id
+  const productosFuente = productosProp && Object.keys(productosProp).length > 0 ? productosProp : productos
 
   // Cargar productos desde Firebase
   useEffect(() => {
-    const userId = user?.uid || user?.id
     if (!userId) return
 
-    const productosRef = ref(database, `tiendas/${userId}/productos`)
+    const productosRef = ref(database, `usuarios/${userId}/productos`)
     const unsubscribe = onValue(productosRef, (snapshot) => {
       if (snapshot.exists()) {
         setProductos(snapshot.val())
@@ -88,12 +92,11 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     }
   }, [user?.uid, user?.id])
 
-  // También cargar desde usuarios si no hay productos en tiendas (para compatibilidad)
+  // También cargar desde la tienda legada si no hay productos en la base nueva
   useEffect(() => {
-    const userId = user?.uid || user?.id
     if (!userId || Object.keys(productos).length > 0) return
 
-    const productosUsuariosRef = ref(database, `usuarios/${userId}/productos`)
+    const productosUsuariosRef = ref(database, `tiendas/${userId}/productos`)
     const unsubscribe = onValue(productosUsuariosRef, (snapshot) => {
       if (snapshot.exists()) {
         setProductos(snapshot.val())
@@ -150,7 +153,6 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
 
   const handleImageUpload = async (file: File) => {
     if (!file) return ""
-    const userId = user?.uid || user?.id
     if (!userId) return ""
     
     setUploadingImage(true)
@@ -189,7 +191,6 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const userId = user?.uid || user?.id
     if (!userId) {
       toast({
         title: "Error",
@@ -210,16 +211,27 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
       precio: Number.parseFloat(formData.precio),
       stock: Number.parseInt(formData.stock),
       imagen: imagenURL,
-      fechaCreacion: new Date().toISOString(),
+      visibleEnTienda: editingProduct ? productosFuente?.[editingProduct]?.visibleEnTienda ?? true : true,
+      fechaCreacion: editingProduct ? productosFuente?.[editingProduct]?.fechaCreacion || new Date().toISOString() : new Date().toISOString(),
+      fechaActualizacion: new Date().toISOString(),
+      usuarioId: userId,
       tiendaId: userId
     }
 
     try {
-      await push(ref(database, `tiendas/${userId}/productos`), productData)
-      toast({
-        title: "Producto agregado",
-        description: "El producto se agregó correctamente"
-      })
+      if (editingProduct) {
+        await set(ref(database, `usuarios/${userId}/productos/${editingProduct}`), productData)
+        toast({
+          title: "Producto actualizado",
+          description: "El producto se actualizó correctamente"
+        })
+      } else {
+        await push(ref(database, `usuarios/${userId}/productos`), productData)
+        toast({
+          title: "Producto agregado",
+          description: "El producto se agregó correctamente"
+        })
+      }
 
       resetForm()
     } catch (error) {
@@ -232,13 +244,20 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     }
   }
 
-  const handleDelete = async (id) => {
-    const userId = user?.uid || user?.id
+  const handleDelete = async (id: string) => {
     if (!userId) return
 
     if (confirm("¿Estás seguro de eliminar este producto?")) {
       try {
-        await remove(ref(database, `tiendas/${userId}/productos/${id}`))
+        await Promise.all([
+          remove(ref(database, `usuarios/${userId}/productos/${id}`)),
+          remove(ref(database, `tiendas/${userId}/productos/${id}`)),
+        ])
+        setProductos((current) => {
+          const nextProducts = { ...current }
+          delete nextProducts[id]
+          return nextProducts
+        })
         toast({
           title: "Producto eliminado",
           description: "El producto se eliminó correctamente"
@@ -254,12 +273,47 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     }
   }
 
-  const handleShare = (producto) => {
+  const handleToggleVisibility = async (producto: Producto) => {
+    if (!userId || !producto.id) return
+
+    const currentProduct = productosFuente?.[producto.id] || producto
+    const nextVisibleState = currentProduct.visibleEnTienda === false
+    const updatedProduct = {
+      ...currentProduct,
+      visibleEnTienda: nextVisibleState,
+      fechaActualizacion: new Date().toISOString(),
+      usuarioId: userId,
+      tiendaId: userId,
+    }
+
+    try {
+      await set(ref(database, `usuarios/${userId}/productos/${producto.id}`), updatedProduct)
+      setProductos((current) => ({
+        ...current,
+        [producto.id as string]: updatedProduct,
+      }))
+      toast({
+        title: nextVisibleState ? "Producto visible" : "Producto oculto",
+        description: nextVisibleState
+          ? "El producto ahora se muestra en la tienda pública."
+          : "El producto quedó oculto para los clientes.",
+      })
+    } catch (error) {
+      console.error("Error al cambiar visibilidad del producto:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar la visibilidad del producto",
+        variant: "destructive"
+      })
+    }
+  }
+
+  const handleShare = (producto: Producto) => {
     setSelectedProductForShare(producto)
     setShowShareDialog(true)
   }
 
-  const generateWhatsAppMessage = (producto) => {
+  const generateWhatsAppMessage = (producto: Producto) => {
     const mensaje = `¡Hola! Te comparto este producto de mi tienda:\n\n` +
       `*${producto.nombre}*\n` +
       `${producto.descripcion}\n\n` +
@@ -270,7 +324,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     return encodeURIComponent(mensaje)
   }
 
-  const generateBuyWhatsAppMessage = (producto) => {
+  const generateBuyWhatsAppMessage = (producto: Producto) => {
     const mensaje = `¡Hola! Quiero comprar:\n\n` +
       `*${producto.nombre}*\n` +
       `💰 Precio: $${producto.precio}\n\n` +
@@ -279,7 +333,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     return encodeURIComponent(mensaje)
   }
 
-  const copyToClipboard = (text) => {
+  const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
     toast({
       title: "Copiado",
@@ -293,7 +347,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     setCurrentPage(1)
   }
 
-  const productosFiltrados = Object.entries(productos || {})
+  const productosFiltrados = Object.entries(productosFuente || {})
     .filter(([id, producto]) => {
       const matchesSearch = producto.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            producto.descripcion?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -306,8 +360,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const startIndex = (currentPage - 1) * itemsPerPage
   const productosPaginados = productosFiltrados.slice(startIndex, startIndex + itemsPerPage)
 
-  const categorias = [...new Set(Object.values(productos || {}).map(p => p.categoria).filter(Boolean))]
-  const userId = user?.uid || user?.id
+  const categorias = [...new Set(Object.values(productosFuente || {}).map(p => p.categoria).filter(Boolean))]
 
   if (!userId) {
     return (
@@ -417,6 +470,22 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
                     {producto.activo === false && (
                       <Badge variant="destructive" className="font-semibold py-1 px-3 rounded-full shadow-md">Inactivo</Badge>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleVisibility(producto)}
+                      className="text-left cursor-pointer"
+                      title={producto.visibleEnTienda === false ? "Mostrar en tienda" : "Ocultar en tienda"}
+                    >
+                      <Badge
+                        className={`font-semibold py-1 px-3 rounded-full shadow-md transition-colors ${
+                          producto.visibleEnTienda === false
+                            ? "bg-slate-500 text-white hover:bg-slate-600"
+                            : "bg-emerald-500 text-white hover:bg-emerald-600"
+                        }`}
+                      >
+                        {producto.visibleEnTienda === false ? "Oculto" : "Visible"}
+                      </Badge>
+                    </button>
                   </div>
                 </div>
                 <CardContent className="p-4 flex flex-col flex-grow">

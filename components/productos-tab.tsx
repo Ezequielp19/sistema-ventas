@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useEffect, useRef } from "react"
 import { ref, set, remove, get } from "firebase/database"
@@ -17,6 +17,7 @@ import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
+import { mergePublicCatalogCollections } from "@/lib/product-sync"
 import { useToast } from "@/hooks/use-toast"
 
 export default function ProductosTab({ proveedores }) {
@@ -152,13 +153,15 @@ export default function ProductosTab({ proveedores }) {
   // Cargar productos desde Firebase
   const cargarProductos = async () => {
     if (!user?.id) return
-    const productosRef = ref(database, `tiendas/${user.id}/productos`)
-    const snapshot = await get(productosRef)
-    if (snapshot.exists()) {
-      setProductos(snapshot.val())
-    } else {
-      setProductos({})
-    }
+    const productosRef = ref(database, `usuarios/${user.id}/productos`)
+    const legacyProductosRef = ref(database, `tiendas/${user.id}/productos`)
+
+    const [snapshot, legacySnapshot] = await Promise.all([get(productosRef), get(legacyProductosRef)])
+
+    const productosActuales = snapshot.exists() ? snapshot.val() : {}
+    const productosLegados = legacySnapshot.exists() ? legacySnapshot.val() : {}
+
+    setProductos(mergePublicCatalogCollections(productosActuales, productosLegados))
   }
 
   useEffect(() => {
@@ -234,6 +237,7 @@ export default function ProductosTab({ proveedores }) {
     }
 
     const productId = editingProduct || generarIdProducto()
+    const existingProduct = productos[productId] || {}
     const productData = {
       ...formData,
       precioVenta: Number.parseFloat(formData.precioVenta),
@@ -242,14 +246,17 @@ export default function ProductosTab({ proveedores }) {
       proveedor: formData.proveedor || null, // Guardar null si no hay proveedor
       imagenes: imagenesURLs.length > 0 ? imagenesURLs : null, // Guardar array de imágenes o null
       imagen: imagenesURLs[0] || null, // Mantener compatibilidad con campo imagen (primera imagen)
-      activo: true, // Por defecto los productos están activos
-      fechaCreacion: new Date().toISOString(),
+      activo: existingProduct.activo !== undefined ? existingProduct.activo : true,
+      visibleEnTienda: existingProduct.visibleEnTienda !== undefined ? existingProduct.visibleEnTienda : true,
+      fechaCreacion: existingProduct.fechaCreacion || new Date().toISOString(),
+      fechaActualizacion: new Date().toISOString(),
       usuarioId: user.id,
+      tiendaId: user.id,
       id: productId,
     }
 
     try {
-      await set(ref(database, `tiendas/${user.id}/productos/${productId}`), productData)
+      await set(ref(database, `usuarios/${user.id}/productos/${productId}`), productData)
       toast({
         title: "Éxito",
         description: editingProduct ? "Producto actualizado correctamente" : "Producto creado correctamente"
@@ -258,9 +265,10 @@ export default function ProductosTab({ proveedores }) {
       resetForm()
       await cargarProductos()
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
       toast({
         title: "Error",
-        description: "Error al guardar producto: " + error.message,
+        description: "Error al guardar producto: " + errorMessage,
         variant: "destructive"
       })
       console.error("Error al guardar producto:", error)
@@ -294,7 +302,10 @@ export default function ProductosTab({ proveedores }) {
 
     if (confirm("¿Estás seguro de eliminar este producto?")) {
       try {
-        await remove(ref(database, `tiendas/${user.id}/productos/${id}`))
+        await Promise.all([
+          remove(ref(database, `usuarios/${user.id}/productos/${id}`)),
+          remove(ref(database, `tiendas/${user.id}/productos/${id}`)),
+        ])
         await cargarProductos() // Recargar productos después de eliminar
       } catch (error) {
         console.error("Error al eliminar producto:", error)
