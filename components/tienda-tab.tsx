@@ -25,7 +25,8 @@ interface Producto {
   id?: string
   nombre: string
   descripcion: string
-  precio: number
+  precio?: number
+  precioVenta?: number
   stock: number
   categoria: string
   imagen: string
@@ -73,6 +74,12 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const itemsPerPage = 12
   const userId = user?.uid || user?.id
   const productosFuente = productosProp && Object.keys(productosProp).length > 0 ? productosProp : productos
+
+  const getProductPrice = (producto: Producto) => {
+    const rawPrice = producto.precioVenta ?? producto.precio ?? 0
+    const parsedPrice = typeof rawPrice === "number" ? rawPrice : Number(rawPrice)
+    return Number.isFinite(parsedPrice) ? parsedPrice : 0
+  }
 
   // Cargar productos desde Firebase
   useEffect(() => {
@@ -209,6 +216,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     const productData = {
       ...formData,
       precio: Number.parseFloat(formData.precio),
+      precioVenta: Number.parseFloat(formData.precio),
       stock: Number.parseInt(formData.stock),
       imagen: imagenURL,
       visibleEnTienda: editingProduct ? productosFuente?.[editingProduct]?.visibleEnTienda ?? true : true,
@@ -314,10 +322,11 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   }
 
   const generateWhatsAppMessage = (producto: Producto) => {
+    const productPrice = getProductPrice(producto)
     const mensaje = `¡Hola! Te comparto este producto de mi tienda:\n\n` +
       `*${producto.nombre}*\n` +
       `${producto.descripcion}\n\n` +
-      `💰 Precio: $${producto.precio}\n` +
+      `💰 Precio: $${productPrice}\n` +
       `📦 Stock disponible: ${producto.stock} unidades\n\n` +
       `¿Te interesa? ¡Contáctame para más información!`
     
@@ -325,9 +334,10 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   }
 
   const generateBuyWhatsAppMessage = (producto: Producto) => {
+    const productPrice = getProductPrice(producto)
     const mensaje = `¡Hola! Quiero comprar:\n\n` +
       `*${producto.nombre}*\n` +
-      `💰 Precio: $${producto.precio}\n\n` +
+      `💰 Precio: $${productPrice}\n\n` +
       `¿Tienes stock disponible?`
     
     return encodeURIComponent(mensaje)
@@ -447,7 +457,10 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {productosPaginados.map((producto) => (
+            {productosPaginados.map((producto) => {
+              const productPrice = getProductPrice(producto)
+
+              return (
               <Card key={producto.id} className="overflow-hidden bg-white dark:bg-slate-800/50 rounded-xl shadow-md hover:shadow-xl transition-all duration-300 flex flex-col">
                 <div className="relative">
                   <div className="aspect-video w-full overflow-hidden">
@@ -502,7 +515,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
                   </div>
                   <div className="flex items-baseline justify-between pt-4 mt-auto">
                     <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-                      ${producto.precio}
+                      ${productPrice}
                     </span>
                     <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
                       Stock: {producto.stock}
@@ -529,7 +542,8 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
                   </DropdownMenu>
                 </div>
               </Card>
-            ))}
+              )
+            })}
           </div>
 
           {totalPages > 1 && (
@@ -562,7 +576,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
                 <div>
                   <h3 className="font-semibold">{selectedProductForShare.nombre}</h3>
                   <p className="text-sm text-muted-foreground">
-                    ${selectedProductForShare.precio}
+                    ${getProductPrice(selectedProductForShare)}
                   </p>
                 </div>
               </div>

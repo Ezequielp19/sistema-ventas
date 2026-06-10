@@ -241,6 +241,7 @@ export default function ProductosTab({ proveedores }) {
     const productData = {
       ...formData,
       precioVenta: Number.parseFloat(formData.precioVenta),
+      precio: Number.parseFloat(formData.precioVenta),
       stock: Number.parseInt(formData.stock),
       stockMinimo: Number.parseInt(formData.stockMinimo),
       proveedor: formData.proveedor || null, // Guardar null si no hay proveedor
