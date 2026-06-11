@@ -16,14 +16,24 @@ import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
 import { useToast } from "@/hooks/use-toast"
 import { deleteProduct, loadMergedProducts, saveProduct } from "@/src/services/products.service"
-import { uploadInventoryProductImage } from "@/src/services/storage.service"
+import { uploadInventoryProductImageDetailed } from "@/src/services/storage.service"
 
-export default function ProductosTab({ proveedores }) {
+type ProviderRecord = {
+  nombre?: string
+  name?: string
+  [key: string]: any
+}
+
+type ProductosTabProps = {
+  proveedores?: Record<string, ProviderRecord>
+}
+
+export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [productos, setProductos] = useState({})
+  const [productos, setProductos] = useState<Record<string, Record<string, any>>>({})
   const [showDialog, setShowDialog] = useState(false)
-  const [editingProduct, setEditingProduct] = useState(null)
+  const [editingProduct, setEditingProduct] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [filterProveedor, setFilterProveedor] = useState("")
   const [filterTipo, setFilterTipo] = useState("")
@@ -117,7 +127,7 @@ export default function ProductosTab({ proveedores }) {
     }
   }
 
-  const handleImageUpload = async (files: File[]): Promise<string[]> => {
+  const handleImageUpload = async (files: File[]): Promise<Array<{ url: string; path: string }>> => {
     if (!files || files.length === 0 || !user?.id) return []
     const userId = user.id
 
@@ -125,7 +135,7 @@ export default function ProductosTab({ proveedores }) {
     try {
       const uploadPromises = files.map(async (file) => {
         try {
-          return await uploadInventoryProductImage(userId, file)
+          return await uploadInventoryProductImageDetailed(userId, file)
         } catch (error) {
           console.error("Error al subir imagen:", error)
           toast({
@@ -138,7 +148,7 @@ export default function ProductosTab({ proveedores }) {
       })
 
       const urls = await Promise.all(uploadPromises)
-      return urls.filter((url): url is string => url !== null)
+      return urls.filter((asset): asset is { url: string; path: string } => asset !== null)
     } finally {
       setUploadingImage(false)
     }
@@ -161,9 +171,9 @@ export default function ProductosTab({ proveedores }) {
   }, [user?.id])
 
   // Filtrar productos
-  const productosArray = Object.entries(productos).map(([id, producto]) => ({
+  const productosArray: Array<Record<string, any> & { id: string }> = Object.entries(productos).map(([id, producto]) => ({
     id,
-    ...producto,
+    ...(producto ?? {}),
   }))
 
   const filteredProducts = productosArray.filter((producto) => {
@@ -188,7 +198,7 @@ export default function ProductosTab({ proveedores }) {
   // Obtener tipos únicos
   const tiposUnicos = [...new Set(productosArray.map((p) => p.tipo).filter(Boolean))]
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     if (!user?.id) {
@@ -220,29 +230,64 @@ export default function ProductosTab({ proveedores }) {
       return
     }
 
-    let imagenesURLs = formData.imagenes || []
+    const existingImageUrls = formData.imagenes || []
+    let imagenesURLs = [...existingImageUrls]
+    let nuevasImagenes: Array<{ url: string; path: string }> = []
     
     // Subir imágenes nuevas si hay alguna seleccionada
     if (selectedImages.length > 0) {
-      const nuevasURLs = await handleImageUpload(selectedImages)
-      imagenesURLs = [...imagenesURLs, ...nuevasURLs]
+      nuevasImagenes = await handleImageUpload(selectedImages)
+      imagenesURLs = [...imagenesURLs, ...nuevasImagenes.map((imagen) => imagen.url)]
     }
 
     const productId = editingProduct || generarIdProducto()
     const existingProduct = productos[productId] || {}
+    const providerId = formData.proveedor || null
+    const providerName = providerId ? proveedores?.[providerId]?.nombre || proveedores?.[providerId]?.name || "" : ""
+    const now = new Date().toISOString()
+    const hasExistingImages = existingImageUrls.length > 0
+    const primaryImageUrl = hasExistingImages
+      ? existingImageUrls[0]
+      : nuevasImagenes[0]?.url || existingProduct.imageUrl || existingProduct.imagen || ""
+    const primaryImagePath = hasExistingImages
+      ? existingProduct.imagePath || existingProduct.thumbPath || ""
+      : nuevasImagenes[0]?.path || existingProduct.imagePath || existingProduct.thumbPath || ""
+    const salePrice = Number.parseFloat(formData.precioVenta)
+    const stock = Number.parseInt(formData.stock)
+    const stockMinimo = Number.parseInt(formData.stockMinimo)
     const productData = {
       ...formData,
-      precioVenta: Number.parseFloat(formData.precioVenta),
-      precio: Number.parseFloat(formData.precioVenta),
-      stock: Number.parseInt(formData.stock),
-      stockMinimo: Number.parseInt(formData.stockMinimo),
-      proveedor: formData.proveedor || null, // Guardar null si no hay proveedor
+      code: formData.codigo.trim(),
+      name: formData.nombre.trim(),
+      nameLower: formData.nombre.trim().toLowerCase(),
+      description: formData.descripcion.trim(),
+      category: formData.tipo.trim(),
+      type: formData.tipo.trim(),
+      salePrice,
+      costPrice: Number(existingProduct.costPrice ?? existingProduct.precioCompra ?? 0),
+      stock,
+      minStock: stockMinimo,
+      isLowStock: stock <= stockMinimo,
+      providerId,
+      providerName,
+      imageUrl: primaryImageUrl,
+      thumbUrl: primaryImageUrl,
+      imagePath: primaryImagePath,
+      thumbPath: primaryImagePath,
+      visibleInStore: existingProduct.visibleInStore !== undefined ? existingProduct.visibleInStore : existingProduct.visibleEnTienda !== undefined ? existingProduct.visibleEnTienda : true,
+      active: existingProduct.active !== undefined ? existingProduct.active : existingProduct.activo !== undefined ? existingProduct.activo : true,
+      precioVenta: salePrice,
+      precio: salePrice,
+      stockMinimo,
+      proveedor: providerId, // Guardar null si no hay proveedor
       imagenes: imagenesURLs.length > 0 ? imagenesURLs : null, // Guardar array de imágenes o null
-      imagen: imagenesURLs[0] || null, // Mantener compatibilidad con campo imagen (primera imagen)
+      imagen: primaryImageUrl || null, // Mantener compatibilidad con campo imagen (primera imagen)
       activo: existingProduct.activo !== undefined ? existingProduct.activo : true,
       visibleEnTienda: existingProduct.visibleEnTienda !== undefined ? existingProduct.visibleEnTienda : true,
-      fechaCreacion: existingProduct.fechaCreacion || new Date().toISOString(),
-      fechaActualizacion: new Date().toISOString(),
+      createdAt: existingProduct.createdAt || existingProduct.fechaCreacion || now,
+      updatedAt: now,
+      fechaCreacion: existingProduct.fechaCreacion || now,
+      fechaActualizacion: now,
       usuarioId: user.id,
       tiendaId: user.id,
       id: productId,
@@ -268,7 +313,7 @@ export default function ProductosTab({ proveedores }) {
     }
   }
 
-  const handleEdit = (id, producto) => {
+  const handleEdit = (id: string, producto: Record<string, any>) => {
     setEditingProduct(id)
     // Asegurarse de que los campos de precio de compra y venta estén presentes
     const productToEdit = {
@@ -278,7 +323,10 @@ export default function ProductosTab({ proveedores }) {
       proveedor: producto.proveedor || "", // Asegurar que sea string vacío si no hay proveedor
       imagenes: producto.imagenes || (producto.imagen ? [producto.imagen] : []), // Convertir imagen única a array si es necesario
     }
-    setFormData(productToEdit)
+    setFormData((prev) => ({
+      ...prev,
+      ...productToEdit,
+    }))
     setImagePreviews(producto.imagenes || (producto.imagen ? [producto.imagen] : []))
     setSelectedImages([])
     if (fileInputRef.current) {
@@ -287,7 +335,7 @@ export default function ProductosTab({ proveedores }) {
     setShowDialog(true)
   }
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: string) => {
     if (!user?.id) {
       console.error("Usuario no autenticado")
       return
