@@ -1,8 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
-import { ref, push, set, get } from "firebase/database"
-import { database } from "@/lib/firebase"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -38,6 +36,7 @@ import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
 import { generarFacturaEmail } from "./factura-pdf-generator"
 import { useAuth } from "@/contexts/auth-context"
+import { createInvoice, loadInvoices } from "@/src/services/sales.service"
 
 interface Factura {
   id: string
@@ -107,17 +106,12 @@ export default function FacturacionTab({ ventas, productos, proveedores }: Factu
     const cargarFacturas = async () => {
       if (!user?.id) return
       try {
-        const facturasRef = ref(database, `usuarios/${user.id}/facturas`)
-        const snapshot = await get(facturasRef)
-        if (snapshot.exists()) {
-          const facturasData = Object.entries(snapshot.val()).map(([id, factura]: [string, any]) => ({
-            id,
-            ...factura
-          }))
-          setFacturas(facturasData)
-        } else {
-          setFacturas([])
-        }
+        const facturasData = await loadInvoices(user.id)
+        const facturasArray = Object.entries(facturasData as Record<string, any>).map(([id, factura]: [string, any]) => ({
+          id,
+          ...(factura as Record<string, any>)
+        }))
+        setFacturas(facturasArray)
       } catch (error) {
         console.error("Error al cargar facturas:", error)
       }
@@ -172,8 +166,7 @@ export default function FacturacionTab({ ventas, productos, proveedores }: Factu
     }
 
     try {
-      const newFacturaRef = await push(ref(database, `usuarios/${user.id}/facturas`), factura)
-      const newFacturaId = newFacturaRef.key
+      const newFacturaId = await createInvoice(user.id, factura)
       setFacturas(prev => [...prev, { id: newFacturaId, ...factura }])
       setShowCreateDialog(false)
       setSelectedVenta(null)

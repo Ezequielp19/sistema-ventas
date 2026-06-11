@@ -10,8 +10,15 @@ import { BarChart3, TrendingUp, Calendar, DollarSign, ShoppingCart, Target } fro
 import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
+import { buildMonthlySalesReport } from "@/src/services/reports.service"
 
-export default function ReportesTab({ ventas, productos, proveedores }) {
+interface ReportesTabProps {
+  ventas: Record<string, any>
+  productos?: Record<string, any>
+  proveedores?: Record<string, any>
+}
+
+export default function ReportesTab({ ventas, productos, proveedores }: ReportesTabProps) {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth().toString())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
 
@@ -20,27 +27,19 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
   const itemsPerPage = 10
 
   // Estados para el modal de ventas del día
-  const [selectedDay, setSelectedDay] = useState(null)
+  const [selectedDay, setSelectedDay] = useState<{ dia: number; total: number; cantidad: number } | null>(null)
   const [showDayModal, setShowDayModal] = useState(false)
-  const [ventasDelDiaSeleccionado, setVentasDelDiaSeleccionado] = useState([])
+  const [ventasDelDiaSeleccionado, setVentasDelDiaSeleccionado] = useState<any[]>([])
 
-  // Procesar datos de ventas
-  const ventasArray = Object.entries(ventas || {}).map(([id, venta]) => ({
-    id,
-    ...venta,
-    fecha: new Date(venta.fecha),
-  }))
+  const monthlyReport = useMemo(
+    () => buildMonthlySalesReport(ventas || {}, Number.parseInt(selectedMonth), Number.parseInt(selectedYear)),
+    [ventas, selectedMonth, selectedYear],
+  ) as ReturnType<typeof buildMonthlySalesReport>
 
-  // Filtrar ventas por mes y año
-  const ventasFiltradas = ventasArray.filter((venta) => {
-    return (
-      venta.fecha.getMonth() === Number.parseInt(selectedMonth) &&
-      venta.fecha.getFullYear() === Number.parseInt(selectedYear)
-    )
-  })
+  const { ventasArray, ventasFiltradas, metricas, diasDelMes, maxVentaDia } = monthlyReport
 
   // Función para manejar click en día del calendario
-  const handleDayClick = (dia) => {
+  const handleDayClick = (dia: { dia: number; total: number; cantidad: number }) => {
     const ventasDelDia = ventasFiltradas.filter((venta) => venta.fecha.getDate() === dia.dia)
     if (ventasDelDia.length > 0) {
       setSelectedDay(dia)
@@ -48,101 +47,6 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
       setShowDayModal(true)
     }
   }
-
-  // Calcular métricas del mes
-  const metricas = useMemo(() => {
-    const totalVentas = ventasFiltradas.reduce((sum, venta) => sum + venta.total, 0)
-    const cantidadVentas = ventasFiltradas.length
-    const promedioVenta = cantidadVentas > 0 ? totalVentas / cantidadVentas : 0
-
-    // Eliminar cálculo de costoTotalVendidos y gananciaNeta
-    // let costoTotalVendidos = 0
-    const productosVendidos = {}
-
-    ventasFiltradas.forEach((venta) => {
-      venta.items?.forEach((item) => {
-        // Eliminar dependencia de precioCompra
-        // const producto = productos[item.id]
-        // const precioCompra = producto?.precioCompra || producto?.precio || item.precio
-        // costoTotalVendidos += precioCompra * item.cantidad
-
-        if (productosVendidos[item.id]) {
-          productosVendidos[item.id].cantidad += item.cantidad
-          productosVendidos[item.id].total += item.precio * item.cantidad
-          // productosVendidos[item.id].costo += precioCompra * item.cantidad; // Eliminado
-        } else {
-          productosVendidos[item.id] = {
-            nombre: item.nombre,
-            cantidad: item.cantidad,
-            total: item.precio * item.cantidad,
-            // costo: precioCompra * item.cantidad, // Eliminado
-          }
-        }
-      })
-    })
-
-    // const gananciaNeta = totalVentas - costoTotalVendidos; // Eliminado
-
-    const topProductos = Object.entries(productosVendidos)
-      .sort(([, a], [, b]) => b.cantidad - a.cantidad)
-      .slice(0, 5)
-
-    // Ventas por día
-    const ventasPorDia = {}
-    ventasFiltradas.forEach((venta) => {
-      const dia = venta.fecha.getDate()
-      if (ventasPorDia[dia]) {
-        ventasPorDia[dia].total += venta.total
-        ventasPorDia[dia].cantidad += 1
-      } else {
-        ventasPorDia[dia] = {
-          total: venta.total,
-          cantidad: 1,
-        }
-      }
-    })
-
-    // Métodos de pago
-    const metodosPago = {}
-    ventasFiltradas.forEach((venta) => {
-      if (venta.pagos) {
-        venta.pagos.forEach((pago) => {
-          const metodo = pago.metodo
-          const monto = Number.parseFloat(pago.monto)
-          if (metodosPago[metodo]) {
-            metodosPago[metodo].total += monto
-            metodosPago[metodo].cantidad += 1
-          } else {
-            metodosPago[metodo] = {
-              total: monto,
-              cantidad: 1,
-            }
-          }
-        })
-      } else if (venta.metodoPago) {
-        if (metodosPago[venta.metodoPago]) {
-          metodosPago[venta.metodoPago].total += venta.total
-          metodosPago[venta.metodoPago].cantidad += 1
-        } else {
-          metodosPago[venta.metodoPago] = {
-            total: venta.total,
-            cantidad: 1,
-          }
-        }
-      }
-    })
-
-    return {
-      totalVentas,
-      cantidadVentas,
-      promedioVenta,
-      // costoTotalVendidos, // Eliminado
-      // gananciaNeta, // Eliminado
-      topProductos,
-      ventasPorDia,
-      metodosPago,
-    }
-  }, [ventasFiltradas, productos])
 
   // Paginación para ventas
   const totalPages = Math.ceil(ventasFiltradas.length / itemsPerPage)
@@ -154,23 +58,6 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
   useEffect(() => {
     setCurrentPage(1)
   }, [selectedMonth, selectedYear])
-
-  // Generar días del mes para el gráfico
-  const diasDelMes = useMemo(() => {
-    const year = Number.parseInt(selectedYear)
-    const month = Number.parseInt(selectedMonth)
-    const diasEnMes = new Date(year, month + 1, 0).getDate()
-
-    return Array.from({ length: diasEnMes }, (_, i) => {
-      const dia = i + 1
-      const ventasDelDia = metricas.ventasPorDia[dia] || { total: 0, cantidad: 0 }
-      return {
-        dia,
-        total: ventasDelDia.total,
-        cantidad: ventasDelDia.cantidad,
-      }
-    })
-  }, [selectedMonth, selectedYear, metricas.ventasPorDia])
 
   const meses = [
     "Enero",
@@ -188,8 +75,6 @@ export default function ReportesTab({ ventas, productos, proveedores }) {
   ]
 
   const años = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i)
-
-  const maxVentaDia = Math.max(...diasDelMes.map((d) => d.total), 1)
 
   return (
     <div className="space-y-6">

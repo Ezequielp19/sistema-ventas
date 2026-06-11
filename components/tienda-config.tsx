@@ -1,9 +1,6 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { ref, set, onValue } from "firebase/database"
-import { ref as storageRef, uploadBytes as uploadStorageBytes, getDownloadURL as getStorageDownloadURL } from "firebase/storage"
-import { database, storage } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -12,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from "@/components/ui/textarea"
 import { Settings, Save, Store, Phone, MapPin, Clock, MessageCircle, Upload, Image, X } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { loadStoreConfig, saveStoreConfig, watchStoreConfig } from "@/src/services/store.service"
+import { uploadStoreLogo } from "@/src/services/storage.service"
 
 interface TiendaConfig {
   nombre: string
@@ -30,7 +29,7 @@ interface TiendaConfig {
 }
 
 interface User {
-  uid: string
+  uid?: string
   phone?: string
   name?: string
   email?: string
@@ -58,14 +57,24 @@ export default function TiendaConfig({ user }: { user: User }) {
   // Cargar configuración existente
   useEffect(() => {
     if (user?.uid) {
-      const configRef = ref(database, `tiendas/${user.uid}/config`)
-      const unsubscribe = onValue(configRef, (snapshot) => {
-        const data = snapshot.val()
+      const userId = user.uid
+      const loadConfig = async () => {
+        const data = await loadStoreConfig(userId)
+        if (data) {
+          setConfig(prev => ({ ...prev, ...data }))
+          setLogoPreview(data.logo || "")
+        }
+      }
+
+      loadConfig()
+
+      const unsubscribe = watchStoreConfig(userId, (data) => {
         if (data) {
           setConfig(prev => ({ ...prev, ...data }))
           setLogoPreview(data.logo || "")
         }
       })
+
       return () => unsubscribe()
     }
   }, [user])
@@ -105,12 +114,11 @@ export default function TiendaConfig({ user }: { user: User }) {
 
   const handleLogoUpload = async (file: File) => {
     if (!file || !user?.uid) return ""
+    const userId = user.uid
     
     setUploadingLogo(true)
     try {
-      const logoRef = storageRef(storage, `tienda/${user.uid}/logo/${Date.now()}_${file.name}`)
-      const snapshot = await uploadStorageBytes(logoRef, file)
-      const downloadURL = await getStorageDownloadURL(snapshot.ref)
+      const downloadURL = await uploadStoreLogo(userId, file)
       setUploadingLogo(false)
       return downloadURL
     } catch (error) {
@@ -127,6 +135,8 @@ export default function TiendaConfig({ user }: { user: User }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!user?.uid) return
+    const userId = user.uid
     
     let logoURL = config.logo
     
@@ -144,7 +154,7 @@ export default function TiendaConfig({ user }: { user: User }) {
     }
     
     try {
-      await set(ref(database, `tiendas/${user.uid}/config`), configToSave)
+      await saveStoreConfig(userId, configToSave)
       toast({
         title: "Configuración guardada",
         description: "La configuración de tu tienda se guardó correctamente"

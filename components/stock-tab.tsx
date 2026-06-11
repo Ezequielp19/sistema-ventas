@@ -1,8 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ref, update } from "firebase/database"
-import { database } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,8 +12,11 @@ import { Badge } from "@/components/ui/badge"
 import { Plus, Package, ChevronDown, ChevronUp, X } from "lucide-react"
 import { Pagination } from "@/components/ui/pagination"
 import HelpTooltip from "./help-tooltip"
+import { useAuth } from "@/contexts/auth-context"
+import { setProductStock } from "@/src/services/products.service"
 
 export default function StockTab({ productos, stockBajo }) {
+  const { user } = useAuth()
   const [showDialog, setShowDialog] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [cantidadAgregar, setCantidadAgregar] = useState("")
@@ -30,15 +31,13 @@ export default function StockTab({ productos, stockBajo }) {
   const itemsPerPage = 10
 
   const handleAddStock = async () => {
-    if (!selectedProduct || !cantidadAgregar) return
+    if (!selectedProduct || !cantidadAgregar || !user?.id) return
 
     const cantidad = Number.parseInt(cantidadAgregar)
     const nuevoStock = productos[selectedProduct].stock + cantidad
 
     try {
-      await update(ref(database), {
-        [`productos/${selectedProduct}/stock`]: nuevoStock,
-      })
+      await setProductStock(user.id, selectedProduct, nuevoStock)
 
       setShowDialog(false)
       setSelectedProduct(null)

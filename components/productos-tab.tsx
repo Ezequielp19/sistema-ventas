@@ -1,9 +1,6 @@
 ﻿"use client"
 
 import { useState, useEffect, useRef } from "react"
-import { ref, set, remove, get } from "firebase/database"
-import { ref as storageRef, uploadBytes as uploadStorageBytes, getDownloadURL as getStorageDownloadURL } from "firebase/storage"
-import { database, storage } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,8 +14,9 @@ import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
-import { mergePublicCatalogCollections } from "@/lib/product-sync"
 import { useToast } from "@/hooks/use-toast"
+import { deleteProduct, loadMergedProducts, saveProduct } from "@/src/services/products.service"
+import { uploadInventoryProductImage } from "@/src/services/storage.service"
 
 export default function ProductosTab({ proveedores }) {
   const { user } = useAuth()
@@ -121,28 +119,29 @@ export default function ProductosTab({ proveedores }) {
 
   const handleImageUpload = async (files: File[]): Promise<string[]> => {
     if (!files || files.length === 0 || !user?.id) return []
-    
-    setUploadingImage(true)
-    const uploadPromises = files.map(async (file) => {
-      try {
-        const imageRef = storageRef(storage, `productos/${user.id}/${Date.now()}_${file.name}`)
-        const snapshot = await uploadStorageBytes(imageRef, file)
-        const downloadURL = await getStorageDownloadURL(snapshot.ref)
-        return downloadURL
-      } catch (error) {
-        console.error("Error al subir imagen:", error)
-        toast({
-          title: "Error",
-          description: `No se pudo subir ${file.name}`,
-          variant: "destructive"
-        })
-        return null
-      }
-    })
+    const userId = user.id
 
-    const urls = await Promise.all(uploadPromises)
-    setUploadingImage(false)
-    return urls.filter((url): url is string => url !== null)
+    setUploadingImage(true)
+    try {
+      const uploadPromises = files.map(async (file) => {
+        try {
+          return await uploadInventoryProductImage(userId, file)
+        } catch (error) {
+          console.error("Error al subir imagen:", error)
+          toast({
+            title: "Error",
+            description: `No se pudo subir ${file.name}`,
+            variant: "destructive"
+          })
+          return null
+        }
+      })
+
+      const urls = await Promise.all(uploadPromises)
+      return urls.filter((url): url is string => url !== null)
+    } finally {
+      setUploadingImage(false)
+    }
   }
 
   const generarIdProducto = () => {
@@ -153,15 +152,8 @@ export default function ProductosTab({ proveedores }) {
   // Cargar productos desde Firebase
   const cargarProductos = async () => {
     if (!user?.id) return
-    const productosRef = ref(database, `usuarios/${user.id}/productos`)
-    const legacyProductosRef = ref(database, `tiendas/${user.id}/productos`)
-
-    const [snapshot, legacySnapshot] = await Promise.all([get(productosRef), get(legacyProductosRef)])
-
-    const productosActuales = snapshot.exists() ? snapshot.val() : {}
-    const productosLegados = legacySnapshot.exists() ? legacySnapshot.val() : {}
-
-    setProductos(mergePublicCatalogCollections(productosActuales, productosLegados))
+    const productosActuales = await loadMergedProducts(user.id)
+    setProductos(productosActuales)
   }
 
   useEffect(() => {
@@ -257,7 +249,7 @@ export default function ProductosTab({ proveedores }) {
     }
 
     try {
-      await set(ref(database, `usuarios/${user.id}/productos/${productId}`), productData)
+      await saveProduct(user.id, productId, productData)
       toast({
         title: "Éxito",
         description: editingProduct ? "Producto actualizado correctamente" : "Producto creado correctamente"
@@ -303,10 +295,7 @@ export default function ProductosTab({ proveedores }) {
 
     if (confirm("¿Estás seguro de eliminar este producto?")) {
       try {
-        await Promise.all([
-          remove(ref(database, `usuarios/${user.id}/productos/${id}`)),
-          remove(ref(database, `tiendas/${user.id}/productos/${id}`)),
-        ])
+        await deleteProduct(user.id, id)
         await cargarProductos() // Recargar productos después de eliminar
       } catch (error) {
         console.error("Error al eliminar producto:", error)

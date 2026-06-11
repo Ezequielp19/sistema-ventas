@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { use } from "react"
-import { ref, get } from "firebase/database"
-import { database } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -14,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Pagination } from "@/components/ui/pagination"
 import { useClient } from "@/hooks/use-client"
 import { ClientOnly } from "@/components/client-only"
-import { mergePublicCatalogCollections } from "@/lib/product-sync"
+import { loadPublicStore } from "@/src/services/store.service"
 
 interface Producto {
   id?: string
@@ -40,7 +38,7 @@ interface TiendaConfig {
   direccion: string
   horarios: string
   logo: string
-  redesSociales: {
+  redesSociales?: {
     instagram?: string
     facebook?: string
   }
@@ -82,23 +80,13 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
     const cargarTienda = async () => {
       setLoading(true)
       try {
-        const configRef = ref(database, `tiendas/${userId}/config`)
-        const inventoryProductosRef = ref(database, `usuarios/${userId}/productos`)
-        const storeProductosRef = ref(database, `tiendas/${userId}/productos`)
+        const { config, products } = await loadPublicStore(userId)
 
-        const [configSnapshot, inventorySnapshot, storeSnapshot] = await Promise.all([
-          get(configRef),
-          get(inventoryProductosRef),
-          get(storeProductosRef)
-        ]);
-
-        if (configSnapshot.exists()) {
-          setTiendaConfig(configSnapshot.val())
+        if (config) {
+          setTiendaConfig(config as TiendaConfig)
         }
 
-        const inventoryProducts = inventorySnapshot.exists() ? inventorySnapshot.val() : {}
-        const storeProducts = storeSnapshot.exists() ? storeSnapshot.val() : {}
-        setProductos(mergePublicCatalogCollections(inventoryProducts, storeProducts))
+        setProductos((products || {}) as Record<string, Producto>)
       } catch (error) {
         console.error("Error al cargar la tienda:", error)
         setProductos({})

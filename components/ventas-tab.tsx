@@ -1,8 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ref, push, update, remove } from "firebase/database"
-import { database } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -16,6 +14,7 @@ import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
+import { deleteSaleAndRestoreStock, processSale } from "@/src/services/sales.service"
 
 export default function VentasTab({ productos, ventas, proveedores, triggerNewSale }) {
   const { user } = useAuth()
@@ -134,17 +133,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
     }
 
     try {
-      // Crear la venta
-      await push(ref(database, `usuarios/${user.id}/ventas`), ventaData)
-
-      // Actualizar stock de productos
-      const updates = {}
-      carrito.forEach((item) => {
-        const nuevoStock = productos[item.id].stock - item.cantidad
-        updates[`usuarios/${user.id}/productos/${item.id}/stock`] = nuevoStock
-      })
-
-      await update(ref(database), updates)
+      await processSale(user.id, ventaData, productos)
 
       // Limpiar formulario
       setCarrito([])
@@ -173,22 +162,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
     }
 
     try {
-      // Restaurar stock de productos
-      const updates = {}
-      venta.items?.forEach((item) => {
-        if (productos[item.id]) {
-          const nuevoStock = productos[item.id].stock + item.cantidad
-          updates[`usuarios/${user.id}/productos/${item.id}/stock`] = nuevoStock
-        }
-      })
-
-      // Actualizar stock primero
-      if (Object.keys(updates).length > 0) {
-        await update(ref(database), updates)
-      }
-
-      // Eliminar la venta
-      await remove(ref(database, `usuarios/${user.id}/ventas/${ventaId}`))
+      await deleteSaleAndRestoreStock(user.id, ventaId, venta, productos)
 
       alert("Venta eliminada exitosamente y stock restaurado")
     } catch (error) {

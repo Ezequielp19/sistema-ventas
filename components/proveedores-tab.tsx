@@ -1,8 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ref, push, set, remove, update } from "firebase/database"
-import { database } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,6 +13,7 @@ import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
+import { adjustProductPricesByProvider, createProvider, deleteProvider, saveProvider } from "@/src/services/providers.service"
 
 export default function ProveedoresTab({ proveedores, productos }: { proveedores: any, productos: any }) {
   const { user } = useAuth()
@@ -63,9 +62,9 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
 
     try {
       if (editingProveedor) {
-        await set(ref(database, `usuarios/${user.id}/proveedores/${editingProveedor}`), proveedorData)
+        await saveProvider(user.id, editingProveedor, proveedorData)
       } else {
-        await push(ref(database, `usuarios/${user.id}/proveedores`), proveedorData)
+        await createProvider(user.id, proveedorData)
       }
 
       setShowDialog(false)
@@ -89,7 +88,7 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
 
     if (confirm("¿Estás seguro de eliminar este proveedor?")) {
       try {
-        await remove(ref(database, `usuarios/${user.id}/proveedores/${id}`))
+        await deleteProvider(user.id, id)
       } catch (error) {
         console.error("Error al eliminar proveedor:", error)
       }
@@ -99,28 +98,14 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
   const handlePriceAdjustment = async () => {
     if (!selectedProveedor || !porcentajeAjuste || !user?.id) return
 
-    const porcentaje = Number.parseFloat(porcentajeAjuste) / 100
-    const factor = tipoAjuste === "aumento" ? 1 + porcentaje : 1 - porcentaje
-
-    let productosAfectados = []
-
-    if (selectedProveedor === "todos") {
-      // Actualizar TODOS los productos del usuario
-      productosAfectados = Object.entries(productos)
-    } else {
-      // Actualizar solo productos del proveedor seleccionado
-      productosAfectados = Object.entries(productos).filter(
-        ([id, producto]: [string, any]) => producto.proveedor === selectedProveedor,
-      )
-    }
-
     try {
-      const updates: Record<string, number> = {}
-      productosAfectados.forEach(([id, producto]: [string, any]) => {
-        updates[`usuarios/${user.id}/productos/${id}/precioVenta`] = (producto.precioVenta || producto.precio || 0) * factor
-      })
-
-      await update(ref(database), updates)
+      await adjustProductPricesByProvider(
+        user.id,
+        productos,
+        selectedProveedor,
+        tipoAjuste as "aumento" | "reduccion",
+        porcentajeAjuste,
+      )
       setShowPriceDialog(false)
       setPorcentajeAjuste("")
       setSelectedProveedor(null)

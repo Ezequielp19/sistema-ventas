@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,6 +28,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 import ExportButtons from "./export-buttons"
 import AdvancedComparisons from "./advanced-comparisons"
 import HelpTooltip from "./help-tooltip"
+import { buildComparisonSalesReport, buildPeriodSalesReport } from "@/src/services/reports.service"
 
 interface CustomReport {
   id: string
@@ -66,8 +67,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
     filtros: {}
   })
 
-  // Procesar datos de ventas
-  const ventasArray = Object.entries(ventas || {}).map(([id, venta]) => ({
+  const ventasArray: any[] = Object.entries(ventas || {}).map(([id, venta]: [string, any]) => ({
     id,
     ...venta,
     fecha: new Date(venta.fecha),
@@ -113,6 +113,8 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
 
   // Función para generar datos del reporte
   const generateReportData = (report: CustomReport) => {
+    return buildPeriodSalesReport(ventas || {}, report.configuracion.periodo)
+
     const currentDate = new Date()
     let startDate: Date
     let endDate: Date
@@ -175,6 +177,8 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
 
   // Función para comparar períodos
   const generateComparisonData = (report: CustomReport) => {
+    return buildComparisonSalesReport(ventas || {}, report.configuracion.periodo)
+
     const currentDate = new Date()
     let currentPeriod: { start: Date, end: Date }
     let previousPeriod: { start: Date, end: Date }

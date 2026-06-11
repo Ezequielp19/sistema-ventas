@@ -1,9 +1,6 @@
 ﻿"use client"
 
 import { useState, useEffect, useRef } from "react"
-import { ref, push, set, remove, onValue, off, get } from "firebase/database"
-import { ref as storageRef, uploadBytes as uploadStorageBytes, getDownloadURL as getStorageDownloadURL } from "firebase/storage"
-import { database, storage } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,6 +17,15 @@ import { Separator } from "@/components/ui/separator"
 import TiendaConfig from "./tienda-config"
 import { ClientOnly } from "@/components/client-only"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  createStoreProduct,
+  deleteStoreProduct,
+  saveStoreProduct,
+  toggleStoreProductVisibility,
+  watchStoreConfig,
+  watchStoreProducts,
+} from "@/src/services/store.service"
+import { uploadStoreProductImage } from "@/src/services/storage.service"
 
 interface Producto {
   id?: string
@@ -59,6 +65,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const [imagePreview, setImagePreview] = useState("")
   const [showShareDialog, setShowShareDialog] = useState(false)
   const [selectedProductForShare, setSelectedProductForShare] = useState<Producto | null>(null)
+  const [editingProduct, setEditingProduct] = useState<string | null>(null)
   const [tiendaConfig, setTiendaConfig] = useState({
     nombre: "Mi Tienda",
     descripcion: "Los mejores productos al mejor precio",
@@ -85,35 +92,12 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   useEffect(() => {
     if (!userId) return
 
-    const productosRef = ref(database, `usuarios/${userId}/productos`)
-    const unsubscribe = onValue(productosRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setProductos(snapshot.val())
-      } else {
-        setProductos({})
-      }
+    const unsubscribe = watchStoreProducts(userId, (catalogo) => {
+      setProductos((catalogo || {}) as Record<string, Producto>)
     })
 
-    return () => {
-      off(productosRef, 'value', unsubscribe)
-    }
+    return () => unsubscribe()
   }, [user?.uid, user?.id])
-
-  // También cargar desde la tienda legada si no hay productos en la base nueva
-  useEffect(() => {
-    if (!userId || Object.keys(productos).length > 0) return
-
-    const productosUsuariosRef = ref(database, `tiendas/${userId}/productos`)
-    const unsubscribe = onValue(productosUsuariosRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setProductos(snapshot.val())
-      }
-    })
-
-    return () => {
-      off(productosUsuariosRef, 'value', unsubscribe)
-    }
-  }, [user?.uid, user?.id, productos])
 
   const [formData, setFormData] = useState({
     nombre: "",
@@ -131,16 +115,13 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     const userId = user?.uid || user?.id
     if (!userId) return
 
-    const tiendaRef = ref(database, `tiendas/${userId}/config`)
-    const unsubscribe = onValue(tiendaRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setTiendaConfig(snapshot.val())
+    const unsubscribe = watchStoreConfig(userId, (config) => {
+      if (config) {
+        setTiendaConfig(config)
       }
     })
 
-    return () => {
-      off(tiendaRef, 'value', unsubscribe)
-    }
+    return () => unsubscribe()
   }, [user?.uid, user?.id])
 
   const resetForm = () => {
@@ -156,6 +137,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     })
     setSelectedImage(null)
     setImagePreview("")
+    setEditingProduct(null)
   }
 
   const handleImageUpload = async (file: File) => {
@@ -164,9 +146,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     
     setUploadingImage(true)
     try {
-      const imageRef = storageRef(storage, `tienda/${userId}/${Date.now()}_${file.name}`)
-      const snapshot = await uploadStorageBytes(imageRef, file)
-      const downloadURL = await getStorageDownloadURL(snapshot.ref)
+      const downloadURL = await uploadStoreProductImage(userId, file)
       setUploadingImage(false)
       return downloadURL
     } catch (error) {
@@ -228,13 +208,13 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
 
     try {
       if (editingProduct) {
-        await set(ref(database, `usuarios/${userId}/productos/${editingProduct}`), productData)
+        await saveStoreProduct(userId, editingProduct, productData)
         toast({
           title: "Producto actualizado",
           description: "El producto se actualizó correctamente"
         })
       } else {
-        await push(ref(database, `usuarios/${userId}/productos`), productData)
+        await createStoreProduct(userId, productData)
         toast({
           title: "Producto agregado",
           description: "El producto se agregó correctamente"
@@ -257,10 +237,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
 
     if (confirm("¿Estás seguro de eliminar este producto?")) {
       try {
-        await Promise.all([
-          remove(ref(database, `usuarios/${userId}/productos/${id}`)),
-          remove(ref(database, `tiendas/${userId}/productos/${id}`)),
-        ])
+        await deleteStoreProduct(userId, id)
         setProductos((current) => {
           const nextProducts = { ...current }
           delete nextProducts[id]
@@ -295,7 +272,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     }
 
     try {
-      await set(ref(database, `usuarios/${userId}/productos/${producto.id}`), updatedProduct)
+      await toggleStoreProductVisibility(userId, producto.id, nextVisibleState)
       setProductos((current) => ({
         ...current,
         [producto.id as string]: updatedProduct,
