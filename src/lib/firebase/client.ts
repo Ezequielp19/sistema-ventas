@@ -5,13 +5,13 @@ import { getDatabase } from "firebase/database"
 import { getStorage } from "firebase/storage"
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyCpGByP4yV91k0hm3TZX8P3NHQUuckNumw",
-  authDomain: "app-servicios-e99de.firebaseapp.com",
-  projectId: "app-servicios-e99de",
-  storageBucket: "app-servicios-e99de.appspot.com",
-  messagingSenderId: "281743607632",
-  appId: "1:281743607632:web:11509479f18726330e0e55",
-  measurementId: "G-0CTZQ2JPY2",
+  apiKey: "AIzaSyB3BHHh94t_WmyUHFvzIlmfRUW3tHq2XC0",
+  authDomain: "project-2be81f90-7132-4b3f-ac0.firebaseapp.com",
+  projectId: "project-2be81f90-7132-4b3f-ac0",
+  storageBucket: "project-2be81f90-7132-4b3f-ac0.firebasestorage.app",
+  messagingSenderId: "602477706615",
+  appId: "1:602477706615:web:2247a85babee7a3f2e7572",
+  measurementId: "G-6DVFNCLNTR"
 }
 
 export const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig)

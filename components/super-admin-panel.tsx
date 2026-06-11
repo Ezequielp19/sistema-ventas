@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react"
 import { ref, get, set, push, remove } from "firebase/database"
-import { database } from "@/lib/firebase"
+import { database, auth } from "@/lib/firebase"
+import { signInWithEmailAndPassword } from "firebase/auth"
+import emailjs from "@emailjs/browser"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -27,6 +29,17 @@ import {
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 
+// Configuración de EmailJS
+const EMAILJS_CONFIG = {
+  serviceId: "service_f0e608c",
+  templateId: "template_m8gla55",
+  publicKey: "HV8KNcQorsxYP088j"
+}
+
+const APP_URL = "https://sistema-ventas-lilac.vercel.app/"
+const SUPER_ADMIN_EMAIL = "adminatenea@software.com"
+const SUPER_ADMIN_PASSWORD = "adminatenea"
+
 export default function SuperAdminPanel({ user, onLogout }) {
   const [usuarios, setUsuarios] = useState({})
   const [showUserDialog, setShowUserDialog] = useState(false)
@@ -34,6 +47,7 @@ export default function SuperAdminPanel({ user, onLogout }) {
   const [copiedPassword, setCopiedPassword] = useState(null)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [sendingEmail, setSendingEmail] = useState(false)
 
   const [userFormData, setUserFormData] = useState({
     nombre: "",
@@ -44,17 +58,52 @@ export default function SuperAdminPanel({ user, onLogout }) {
     activo: true
   })
 
+  const ensureSuperAdminFirebaseAuth = async () => {
+    if (auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.email === SUPER_ADMIN_EMAIL) {
+      return auth.currentUser
+    }
+
+    const credential = await signInWithEmailAndPassword(auth, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD)
+    return credential.user
+  }
+
   useEffect(() => {
-    loadData()
+    // Inicializar EmailJS
+    try {
+      emailjs.init(EMAILJS_CONFIG.publicKey)
+      console.log("EmailJS inicializado correctamente")
+    } catch (error) {
+      console.error("Error al inicializar EmailJS:", error)
+    }
+    
+    // Asegurar autenticación antes de cargar datos
+    const initializeAndLoad = async () => {
+      try {
+        await ensureSuperAdminFirebaseAuth()
+        await loadData()
+      } catch (error) {
+        console.error("Error al inicializar:", error)
+        setError("Error al autenticar el super administrador con Firebase. Verifica el usuario y la contraseña configurados en el panel.")
+      }
+    }
+    
+    initializeAndLoad()
   }, [])
 
   const loadData = async () => {
     try {
+      await ensureSuperAdminFirebaseAuth()
+      
       const usuariosSnapshot = await get(ref(database, "usuarios"))
       setUsuarios(usuariosSnapshot.val() || {})
+      setError("") // Limpiar errores si la carga es exitosa
     } catch (error) {
       console.error("Error al cargar datos:", error)
-      setError("Error al cargar los usuarios")
+      if (error.code === "PERMISSION_DENIED") {
+        setError("Error de permisos al cargar usuarios. Verifica las reglas de seguridad de Firebase Realtime Database.")
+      } else {
+        setError(`Error al cargar los usuarios: ${error.message || "Error desconocido"}`)
+      }
     }
   }
 
@@ -65,6 +114,84 @@ export default function SuperAdminPanel({ user, onLogout }) {
       password += chars.charAt(Math.floor(Math.random() * chars.length))
     }
     return password
+  }
+
+  const sendWelcomeEmail = async (userEmail, userName, userPassword) => {
+    try {
+      setSendingEmail(true)
+      
+      // Verificar que EmailJS esté inicializado
+      if (!emailjs.init) {
+        emailjs.init(EMAILJS_CONFIG.publicKey)
+      }
+      
+      const templateParams = {
+        to_email: userEmail,
+        to_name: userName || userEmail.split('@')[0], // Usar nombre o parte del email si no hay nombre
+        user_email: userEmail,
+        user_password: userPassword,
+        login_url: APP_URL,
+        app_name: "Sistema de Ventas"
+      }
+
+      console.log("Enviando email con parámetros:", {
+        serviceId: EMAILJS_CONFIG.serviceId,
+        templateId: EMAILJS_CONFIG.templateId,
+        to: userEmail,
+        params: { ...templateParams, user_password: '***' } // No mostrar contraseña en logs
+      })
+
+      const response = await emailjs.send(
+        EMAILJS_CONFIG.serviceId,
+        EMAILJS_CONFIG.templateId,
+        templateParams,
+        EMAILJS_CONFIG.publicKey
+      )
+
+      console.log("Email enviado exitosamente:", response)
+      return true
+    } catch (error) {
+      console.error("Error detallado al enviar email:", {
+        error,
+        status: error?.status,
+        text: error?.text,
+        message: error?.message,
+        serviceId: EMAILJS_CONFIG.serviceId,
+        templateId: EMAILJS_CONFIG.templateId
+      })
+      
+      // El error 412 puede tener diferentes causas
+      if (error?.status === 412) {
+        const errorText = error?.text || error?.message || ''
+        
+        // Error específico de Gmail API
+        if (errorText.includes('Gmail_API') || errorText.includes('Invalid grant') || errorText.includes('reconnect')) {
+          console.error("❌ Error de Gmail API: La cuenta de Gmail necesita ser reconectada en EmailJS")
+          console.error("📋 Solución:")
+          console.error("1. Ve a https://dashboard.emailjs.com/admin/integration")
+          console.error("2. Busca el servicio 'service_f0e608c'")
+          console.error("3. Haz clic en 'Reconnect' o 'Reconectar'")
+          console.error("4. Autoriza nuevamente el acceso a Gmail")
+          console.error("5. Guarda los cambios")
+          
+          // Mostrar mensaje más amigable al usuario
+          setError("Error: La cuenta de Gmail necesita ser reconectada en EmailJS. El usuario se creó correctamente, pero el email no se pudo enviar.")
+        } else {
+          // Otros errores 412
+          console.error("Error 412: Problema con la configuración de EmailJS. Verifica:")
+          console.error("1. Que el template ID sea correcto:", EMAILJS_CONFIG.templateId)
+          console.error("2. Que el servicio ID sea correcto:", EMAILJS_CONFIG.serviceId)
+          console.error("3. Que las variables en el template coincidan con las enviadas")
+          console.error("4. Que el campo 'To Email' esté configurado en el template")
+          console.error("5. Que el servicio de email esté conectado correctamente")
+        }
+      }
+      
+      // No lanzamos el error para que no interrumpa el flujo de creación del usuario
+      return false
+    } finally {
+      setSendingEmail(false)
+    }
   }
 
   const resetUserForm = () => {
@@ -87,12 +214,24 @@ export default function SuperAdminPanel({ user, onLogout }) {
     setSuccess("")
     
     try {
+      try {
+        await ensureSuperAdminFirebaseAuth()
+      } catch (authError) {
+        console.error("Error al autenticar con Firebase:", authError)
+        setError("Error de autenticación del administrador. Revisa las credenciales de Firebase Auth.")
+        return
+      }
+
       // Validar que el email no esté duplicado
-      const usuariosArray = Object.values(usuarios)
-      const emailExists = usuariosArray.some(u => 
-        u.email.toLowerCase() === userFormData.email.toLowerCase() && 
-        (!editingUser || u.id !== editingUser)
-      )
+      const normalizedEmail = userFormData.email.trim().toLowerCase()
+      const usuariosArray = Object.entries(usuarios)
+        .filter(([, userData]) => typeof userData === "object" && userData !== null)
+        .map(([id, userData]) => ({ id, ...(userData as Record<string, any>) }))
+
+      const emailExists = usuariosArray.some((u) => {
+        const existingEmail = typeof u.email === "string" ? u.email.trim().toLowerCase() : ""
+        return existingEmail === normalizedEmail && (!editingUser || u.id !== editingUser)
+      })
 
       if (emailExists) {
         setError("Este email ya está registrado")
@@ -111,6 +250,19 @@ export default function SuperAdminPanel({ user, onLogout }) {
       } else {
         await push(ref(database, "usuarios"), userData)
         setSuccess("Usuario creado correctamente")
+        
+        // Enviar email de bienvenida solo cuando se crea un usuario nuevo
+        const emailSent = await sendWelcomeEmail(
+          userFormData.email,
+          userFormData.nombre,
+          userFormData.password
+        )
+        
+        if (emailSent) {
+          setSuccess("Usuario creado correctamente. Email de bienvenida enviado.")
+        } else {
+          setSuccess("Usuario creado correctamente. (No se pudo enviar el email de bienvenida)")
+        }
       }
 
       setShowUserDialog(false)
@@ -118,7 +270,11 @@ export default function SuperAdminPanel({ user, onLogout }) {
       loadData()
     } catch (error) {
       console.error("Error al guardar usuario:", error)
-      setError("Error al guardar el usuario")
+      if (error.code === "PERMISSION_DENIED") {
+        setError("Error de permisos. Verifica las reglas de seguridad de Firebase Realtime Database.")
+      } else {
+        setError(`Error al guardar el usuario: ${error.message || "Error desconocido"}`)
+      }
     }
   }
 
@@ -138,12 +294,18 @@ export default function SuperAdminPanel({ user, onLogout }) {
   const handleDeleteUser = async (id) => {
     if (confirm("¿Estás seguro de eliminar este usuario?")) {
       try {
+        await ensureSuperAdminFirebaseAuth()
+        
         await remove(ref(database, `usuarios/${id}`))
         setSuccess("Usuario eliminado correctamente")
         loadData()
       } catch (error) {
         console.error("Error al eliminar usuario:", error)
-        setError("Error al eliminar el usuario")
+        if (error.code === "PERMISSION_DENIED") {
+          setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
+        } else {
+          setError("Error al eliminar el usuario")
+        }
       }
     }
   }
@@ -154,12 +316,18 @@ export default function SuperAdminPanel({ user, onLogout }) {
     
     if (confirm(`¿Estás seguro de ${newStatus ? "activar" : "desactivar"} este usuario?`)) {
       try {
+        await ensureSuperAdminFirebaseAuth()
+        
         await set(ref(database, `usuarios/${id}/activo`), newStatus)
         setSuccess(`Usuario ${statusText} correctamente`)
         loadData()
       } catch (error) {
         console.error("Error al cambiar estado del usuario:", error)
-        setError("Error al cambiar el estado del usuario")
+        if (error.code === "PERMISSION_DENIED") {
+          setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
+        } else {
+          setError("Error al cambiar el estado del usuario")
+        }
       }
     }
   }
@@ -364,8 +532,17 @@ export default function SuperAdminPanel({ user, onLogout }) {
                     <Button type="button" variant="outline" onClick={() => setShowUserDialog(false)}>
                       Cancelar
                     </Button>
-                    <Button type="submit">
-                      {editingUser ? "Actualizar" : "Crear"} Usuario
+                    <Button type="submit" disabled={sendingEmail}>
+                      {sendingEmail ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Enviando email...
+                        </>
+                      ) : (
+                        <>
+                          {editingUser ? "Actualizar" : "Crear"} Usuario
+                        </>
+                      )}
                     </Button>
                   </div>
                 </form>

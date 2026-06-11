@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { ref, get } from "firebase/database"
-import { database } from "@/lib/firebase"
+import { database, auth } from "@/lib/firebase"
+import { signInAnonymously, signInWithEmailAndPassword } from "firebase/auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -28,6 +29,21 @@ export default function Home() {
     try {
       // Verificar si es super admin
       if (email.toLowerCase() === "adminatenea@software.com" && password === "adminatenea") {
+        // Intentar autenticar con Firebase Auth para permitir escritura en la base de datos
+        try {
+          // Intentar autenticar con email/password primero
+          try {
+            await signInWithEmailAndPassword(auth, email, password)
+          } catch (authError) {
+            // Si falla, usar autenticación anónima como fallback
+            // Esto permite que el super admin tenga permisos de escritura
+            await signInAnonymously(auth)
+          }
+        } catch (firebaseAuthError) {
+          console.warn("No se pudo autenticar con Firebase Auth, continuando con autenticación local:", firebaseAuthError)
+          // Continuar aunque falle la autenticación de Firebase Auth
+        }
+
         const adminUser = {
           id: "admin",
           uid: "admin", // Para compatibilidad

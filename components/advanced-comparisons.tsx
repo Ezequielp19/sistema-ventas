@@ -23,9 +23,24 @@ interface AdvancedComparisonsProps {
   ventas: any
   productos: any
   proveedores: any
+  actual?: {
+    total: number
+    cantidad: number
+    promedio: number
+  }
+  anterior?: {
+    total: number
+    cantidad: number
+    promedio: number
+  }
+  variaciones?: {
+    total: number
+    cantidad: number
+    promedio: number
+  }
 }
 
-export default function AdvancedComparisons({ ventas, productos, proveedores }: AdvancedComparisonsProps) {
+export default function AdvancedComparisons({ ventas, productos, proveedores, actual, anterior, variaciones }: AdvancedComparisonsProps) {
   const [comparisonType, setComparisonType] = useState<'mes' | 'trimestre' | 'año'>('mes')
   const [selectedPeriods, setSelectedPeriods] = useState<number>(3)
 

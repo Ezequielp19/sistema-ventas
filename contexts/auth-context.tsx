@@ -1,6 +1,8 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react"
+import { auth } from "@/lib/firebase"
+import { signOut } from "firebase/auth"
 
 interface User {
   id?: string
@@ -79,7 +81,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   // Función de logout
-  const logout = () => {
+  const logout = async () => {
+    // Cerrar sesión de Firebase Auth si está autenticado
+    try {
+      if (auth.currentUser) {
+        await signOut(auth)
+      }
+    } catch (error) {
+      console.error("Error al cerrar sesión de Firebase Auth:", error)
+    }
+    
     setUser(null)
     setIsLoggedIn(false)
     setIsSuperAdmin(false)
