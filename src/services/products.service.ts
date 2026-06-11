@@ -162,6 +162,7 @@ const normalizeProductForWrite = (
   const featured = toBooleanValue(mergedSource.featured ?? mergedSource.destacado, false)
   const createdAt = toStringValue(mergedSource.createdAt ?? mergedSource.fechaCreacion ?? new Date().toISOString())
   const updatedAt = new Date().toISOString()
+  const imageUpdatedAt = toStringValue(mergedSource.imageUpdatedAt ?? mergedSource.fechaActualizacionImagen ?? updatedAt)
   const nameLower = toStringValue(mergedSource.nameLower ?? name.toLowerCase())
   const isLowStock =
     mergedSource.isLowStock !== undefined && mergedSource.isLowStock !== null
@@ -220,6 +221,7 @@ const normalizeProductForWrite = (
       fechaCreacion: createdAt,
       updatedAt,
       fechaActualizacion: updatedAt,
+      imageUpdatedAt,
     },
     productId,
   )
@@ -340,6 +342,10 @@ const normalizeProductUpdatePayload = (updates: Partial<ProductRecord>) => {
 
   if (updates.imagePath !== undefined && updates.thumbPath === undefined) {
     normalizedUpdates.thumbPath = updates.imagePath
+  }
+
+  if (updates.imageUpdatedAt !== undefined) {
+    normalizedUpdates.imageUpdatedAt = updates.imageUpdatedAt
   }
 
   return normalizedUpdates

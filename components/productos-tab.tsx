@@ -16,7 +16,8 @@ import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
 import { useToast } from "@/hooks/use-toast"
 import { deleteProduct, loadMergedProducts, saveProduct } from "@/src/services/products.service"
-import { uploadInventoryProductImageDetailed } from "@/src/services/storage.service"
+import { uploadOptimizedProductImagePair } from "@/src/services/storage.service"
+import { isSupportedProductImageFile } from "@/src/lib/images/optimizeImage"
 
 type ProviderRecord = {
   nombre?: string
@@ -40,6 +41,7 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
   const [uploadingImage, setUploadingImage] = useState(false)
   const [selectedImages, setSelectedImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [imageUploadStatus, setImageUploadStatus] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Paginación
@@ -81,45 +83,43 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
   }
 
   const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    if (!files || files.length === 0) return
+    const file = event.target.files?.[0]
+    if (!file) return
 
-    const newFiles: File[] = []
-    const newPreviews: string[] = []
+    if (!isSupportedProductImageFile(file)) {
+      toast({
+        title: "Error",
+        description: `${file.name} no es una imagen válida. Usa JPG, JPEG, PNG o WebP.`,
+        variant: "destructive"
+      })
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+      return
+    }
 
-    Array.from(files).forEach((file) => {
-      // Validar tipo de archivo
-      if (!file.type.startsWith('image/')) {
-        toast({
-          title: "Error",
-          description: `${file.name} no es un archivo de imagen válido`,
-          variant: "destructive"
-        })
-        return
+    // Validar tamaño (máximo 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "Error",
+        description: `${file.name} es demasiado grande. Máximo 5MB`,
+        variant: "destructive"
+      })
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
       }
-      // Validar tamaño (máximo 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        toast({
-          title: "Error",
-          description: `${file.name} es demasiado grande. Máximo 5MB`,
-          variant: "destructive"
-        })
-        return
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const result = e.target?.result
+      if (typeof result === "string") {
+        setSelectedImages([file])
+        setImagePreviews([result])
       }
-      newFiles.push(file)
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const result = e.target?.result
-        if (typeof result === 'string') {
-          newPreviews.push(result)
-          if (newPreviews.length === newFiles.length) {
-            setSelectedImages(prev => [...prev, ...newFiles])
-            setImagePreviews(prev => [...prev, ...newPreviews])
-          }
-        }
-      }
-      reader.readAsDataURL(file)
-    })
+    }
+    reader.readAsDataURL(file)
 
     // Limpiar el input para permitir seleccionar el mismo archivo nuevamente
     if (fileInputRef.current) {
@@ -127,30 +127,34 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
     }
   }
 
-  const handleImageUpload = async (files: File[]): Promise<Array<{ url: string; path: string }>> => {
-    if (!files || files.length === 0 || !user?.id) return []
-    const userId = user.id
+  const handleImageUpload = async (
+    file: File,
+    productId: string,
+    existingImagePath?: string,
+    existingThumbPath?: string,
+  ) => {
+    if (!file || !user?.id) return null
 
     setUploadingImage(true)
-    try {
-      const uploadPromises = files.map(async (file) => {
-        try {
-          return await uploadInventoryProductImageDetailed(userId, file)
-        } catch (error) {
-          console.error("Error al subir imagen:", error)
-          toast({
-            title: "Error",
-            description: `No se pudo subir ${file.name}`,
-            variant: "destructive"
-          })
-          return null
-        }
-      })
+    setImageUploadStatus("")
 
-      const urls = await Promise.all(uploadPromises)
-      return urls.filter((asset): asset is { url: string; path: string } => asset !== null)
+    try {
+      return await uploadOptimizedProductImagePair(user.id, productId, file, {
+        existingImagePath,
+        existingThumbPath,
+        onStatusChange: setImageUploadStatus,
+      })
+    } catch (error) {
+      console.error("Error al subir imagen optimizada:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "No se pudo procesar la imagen",
+        variant: "destructive"
+      })
+      return null
     } finally {
       setUploadingImage(false)
+      setImageUploadStatus("")
     }
   }
 
@@ -230,28 +234,38 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
       return
     }
 
-    const existingImageUrls = formData.imagenes || []
-    let imagenesURLs = [...existingImageUrls]
-    let nuevasImagenes: Array<{ url: string; path: string }> = []
-    
-    // Subir imágenes nuevas si hay alguna seleccionada
-    if (selectedImages.length > 0) {
-      nuevasImagenes = await handleImageUpload(selectedImages)
-      imagenesURLs = [...imagenesURLs, ...nuevasImagenes.map((imagen) => imagen.url)]
-    }
-
     const productId = editingProduct || generarIdProducto()
     const existingProduct = productos[productId] || {}
+    const existingImageUrls = Array.isArray(existingProduct.imagenes) && existingProduct.imagenes.length > 0
+      ? existingProduct.imagenes
+      : existingProduct.imageUrl
+        ? [existingProduct.imageUrl]
+        : existingProduct.imagen
+          ? [existingProduct.imagen]
+          : []
+    let uploadedImage: Awaited<ReturnType<typeof handleImageUpload>> | null = null
+
+    if (selectedImages.length > 0) {
+      uploadedImage = await handleImageUpload(
+        selectedImages[0],
+        productId,
+        existingProduct.imagePath || "",
+        existingProduct.thumbPath || "",
+      )
+
+      if (!uploadedImage) {
+        return
+      }
+    }
+
     const providerId = formData.proveedor || null
     const providerName = providerId ? proveedores?.[providerId]?.nombre || proveedores?.[providerId]?.name || "" : ""
     const now = new Date().toISOString()
-    const hasExistingImages = existingImageUrls.length > 0
-    const primaryImageUrl = hasExistingImages
-      ? existingImageUrls[0]
-      : nuevasImagenes[0]?.url || existingProduct.imageUrl || existingProduct.imagen || ""
-    const primaryImagePath = hasExistingImages
-      ? existingProduct.imagePath || existingProduct.thumbPath || ""
-      : nuevasImagenes[0]?.path || existingProduct.imagePath || existingProduct.thumbPath || ""
+    const primaryImageUrl = uploadedImage?.url || existingProduct.imageUrl || existingProduct.imagen || ""
+    const primaryThumbUrl = uploadedImage?.thumbUrl || existingProduct.thumbUrl || existingProduct.imageUrl || primaryImageUrl
+    const primaryImagePath = uploadedImage?.path || existingProduct.imagePath || ""
+    const primaryThumbPath = uploadedImage?.thumbPath || existingProduct.thumbPath || ""
+    const imageUpdatedAt = uploadedImage?.imageUpdatedAt || existingProduct.imageUpdatedAt || now
     const salePrice = Number.parseFloat(formData.precioVenta)
     const stock = Number.parseInt(formData.stock)
     const stockMinimo = Number.parseInt(formData.stockMinimo)
@@ -268,19 +282,22 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
       stock,
       minStock: stockMinimo,
       isLowStock: stock <= stockMinimo,
+      featured: existingProduct.featured !== undefined ? existingProduct.featured : existingProduct.destacado !== undefined ? existingProduct.destacado : false,
+      destacado: existingProduct.destacado !== undefined ? existingProduct.destacado : existingProduct.featured !== undefined ? existingProduct.featured : false,
       providerId,
       providerName,
       imageUrl: primaryImageUrl,
-      thumbUrl: primaryImageUrl,
+      thumbUrl: primaryThumbUrl,
       imagePath: primaryImagePath,
-      thumbPath: primaryImagePath,
+      thumbPath: primaryThumbPath,
+      imageUpdatedAt,
       visibleInStore: existingProduct.visibleInStore !== undefined ? existingProduct.visibleInStore : existingProduct.visibleEnTienda !== undefined ? existingProduct.visibleEnTienda : true,
       active: existingProduct.active !== undefined ? existingProduct.active : existingProduct.activo !== undefined ? existingProduct.activo : true,
       precioVenta: salePrice,
       precio: salePrice,
       stockMinimo,
       proveedor: providerId, // Guardar null si no hay proveedor
-      imagenes: imagenesURLs.length > 0 ? imagenesURLs : null, // Guardar array de imágenes o null
+      imagenes: uploadedImage ? [primaryImageUrl] : existingImageUrls.length > 0 ? existingImageUrls : null,
       imagen: primaryImageUrl || null, // Mantener compatibilidad con campo imagen (primera imagen)
       activo: existingProduct.activo !== undefined ? existingProduct.activo : true,
       visibleEnTienda: existingProduct.visibleEnTienda !== undefined ? existingProduct.visibleEnTienda : true,
@@ -321,13 +338,13 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
       // precioCompra: producto.precioCompra || producto.precio, // Eliminado
       precioVenta: producto.precioVenta || producto.precio, // Asegurarse de que se use este
       proveedor: producto.proveedor || "", // Asegurar que sea string vacío si no hay proveedor
-      imagenes: producto.imagenes || (producto.imagen ? [producto.imagen] : []), // Convertir imagen única a array si es necesario
+      imagenes: producto.imagenes || (producto.imageUrl ? [producto.imageUrl] : producto.imagen ? [producto.imagen] : []), // Convertir imagen única a array si es necesario
     }
     setFormData((prev) => ({
       ...prev,
       ...productToEdit,
     }))
-    setImagePreviews(producto.imagenes || (producto.imagen ? [producto.imagen] : []))
+    setImagePreviews(producto.imagenes || (producto.thumbUrl ? [producto.thumbUrl] : producto.imageUrl ? [producto.imageUrl] : producto.imagen ? [producto.imagen] : []))
     setSelectedImages([])
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
@@ -575,8 +592,7 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
                         <Input
                           id="imagenes"
                           type="file"
-                          accept="image/*"
-                          multiple
+                          accept="image/jpeg,image/jpg,image/png,image/webp"
                           ref={fileInputRef}
                           onChange={handleImageSelect}
                           className="hidden"
@@ -591,18 +607,18 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
                           {uploadingImage ? (
                             <>
                               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
-                              Subiendo...
+                              {imageUploadStatus || "Subiendo..."}
                             </>
                           ) : (
                             <>
                               <Upload className="h-4 w-4 mr-2" />
-                              Agregar Imágenes
+                              Agregar Imagen
                             </>
                           )}
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Formatos soportados: JPG, PNG, GIF. Tamaño máximo: 5MB por imagen. Puedes seleccionar múltiples imágenes.
+                        Formatos soportados: JPG, JPEG, PNG y WebP. Tamaño máximo: 5MB.
                       </p>
                     </div>
                   </div>
@@ -698,10 +714,10 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
                 currentItems.map((producto) => (
                   <TableRow key={producto.id}>
                     <TableCell>
-                      {producto.imagen ? (
+                      {producto.thumbUrl || producto.imagen ? (
                         <div className="w-12 h-12 rounded overflow-hidden border">
                           <img
-                            src={producto.imagen}
+                            src={producto.thumbUrl || producto.imagen}
                             alt={producto.nombre}
                             className="w-full h-full object-cover"
                           />
@@ -755,10 +771,10 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
                   <div className="flex gap-4">
                     {/* Imagen */}
                     <div className="flex-shrink-0">
-                      {producto.imagen ? (
+                      {producto.thumbUrl || producto.imagen ? (
                         <div className="w-20 h-20 rounded overflow-hidden border">
                           <img
-                            src={producto.imagen}
+                            src={producto.thumbUrl || producto.imagen}
                             alt={producto.nombre}
                             className="w-full h-full object-cover"
                           />

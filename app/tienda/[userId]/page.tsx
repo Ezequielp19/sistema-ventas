@@ -24,6 +24,11 @@ interface Producto {
   categoria?: string
   tipo?: string
   imagen?: string
+  imageUrl?: string
+  thumbUrl?: string
+  imagePath?: string
+  thumbPath?: string
+  imageUpdatedAt?: string
   imagenes?: string[]
   destacado?: boolean
   activo?: boolean
@@ -542,9 +547,9 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
                           </div>
                         )}
                       </>
-                    ) : selectedProduct.imagen ? (
+                    ) : selectedProduct.imageUrl || selectedProduct.imagen ? (
                       <img
-                        src={selectedProduct.imagen}
+                        src={selectedProduct.imageUrl || selectedProduct.imagen}
                         alt={selectedProduct.nombre}
                         className="w-full h-full object-cover"
                       />

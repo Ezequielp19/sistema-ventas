@@ -135,6 +135,7 @@ export const normalizeCatalogProduct = (product: ProductRecord = {}, id?: string
   const featured = toBoolean(product.featured ?? product.destacado, false)
   const createdAt = toStringValue(product.createdAt ?? product.fechaCreacion)
   const updatedAt = toStringValue(product.updatedAt ?? product.fechaActualizacion ?? createdAt)
+  const imageUpdatedAt = toStringValue(product.imageUpdatedAt ?? updatedAt)
   const nameLower = toStringValue(product.nameLower ?? name.toLowerCase())
   const isLowStock =
     product.isLowStock !== undefined && product.isLowStock !== null
@@ -189,6 +190,7 @@ export const normalizeCatalogProduct = (product: ProductRecord = {}, id?: string
     fechaCreacion: createdAt,
     updatedAt,
     fechaActualizacion: updatedAt,
+    imageUpdatedAt,
     usuarioId: toStringValue(product.usuarioId ?? product.businessId),
     tiendaId: toStringValue(product.tiendaId ?? product.businessId),
     businessId: toStringValue(product.businessId ?? product.usuarioId ?? product.tiendaId),
@@ -272,6 +274,7 @@ export const buildInventoryProductRecord = (
     fechaCreacion: normalizedExistingProduct.fechaCreacion || now,
     updatedAt: now,
     fechaActualizacion: now,
+    imageUpdatedAt: normalizedExistingProduct.imageUpdatedAt || now,
     usuarioId: userId,
     tiendaId: userId,
     businessId: userId,
@@ -337,6 +340,10 @@ export const mergePublicCatalogCollections = (
       inventoryProduct.fechaActualizacion ||
       storeProduct.fechaActualizacion ||
       createdAt
+    const imageUpdatedAt =
+      inventoryProduct.imageUpdatedAt ||
+      storeProduct.imageUpdatedAt ||
+      updatedAt
     const name = inventoryProduct.name || storeProduct.name || ""
     const description = inventoryProduct.description || storeProduct.description || ""
     const category = inventoryProduct.category || inventoryProduct.tipo || storeProduct.category || storeProduct.tipo || ""
@@ -402,6 +409,7 @@ export const mergePublicCatalogCollections = (
       fechaCreacion: createdAt,
       updatedAt,
       fechaActualizacion: updatedAt,
+      imageUpdatedAt,
       featured:
         inventoryProduct.featured !== undefined
           ? inventoryProduct.featured

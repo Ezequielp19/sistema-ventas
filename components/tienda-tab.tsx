@@ -36,6 +36,11 @@ interface Producto {
   stock: number
   categoria: string
   imagen: string
+  imageUrl?: string
+  thumbUrl?: string
+  imagePath?: string
+  thumbPath?: string
+  imageUpdatedAt?: string
   imagenes?: string[]
   destacado: boolean
   activo: boolean
@@ -441,9 +446,9 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
               <Card key={producto.id} className="overflow-hidden bg-white dark:bg-slate-800/50 rounded-xl shadow-md hover:shadow-xl transition-all duration-300 flex flex-col">
                 <div className="relative">
                   <div className="aspect-video w-full overflow-hidden">
-                    {producto.imagen ? (
+                    {producto.thumbUrl || producto.imagen ? (
                       <img
-                        src={producto.imagen}
+                        src={producto.thumbUrl || producto.imagen}
                         alt={producto.nombre}
                         className="w-full h-full object-cover"
                       />
@@ -543,9 +548,9 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
           {selectedProductForShare && (
             <div className="space-y-4">
               <div className="flex items-center gap-4">
-                {selectedProductForShare.imagen && (
+                {(selectedProductForShare.imageUrl || selectedProductForShare.imagen) && (
                   <img
-                    src={selectedProductForShare.imagen}
+                    src={selectedProductForShare.imageUrl || selectedProductForShare.imagen}
                     alt={selectedProductForShare.nombre}
                     className="w-20 h-20 object-cover rounded-lg"
                   />
