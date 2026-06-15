@@ -14,6 +14,14 @@ import SuperAdminPanel from "@/components/super-admin-panel"
 import { LogIn, AlertCircle } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 
+type LegacyUserRecord = {
+  email?: string
+  password?: string
+  activo?: boolean
+  nombre?: string
+  empresa?: string
+}
+
 export default function Home() {
   const { user, isLoggedIn, isSuperAdmin, isLoading, login, logout } = useAuth()
   const [email, setEmail] = useState("")
@@ -21,7 +29,7 @@ export default function Home() {
   const [error, setError] = useState("")
   const [isLoadingLogin, setIsLoadingLogin] = useState(false)
 
-  const handleLogin = async (e) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setIsLoadingLogin(true)
     setError("")
@@ -60,10 +68,10 @@ export default function Home() {
       // Verificar usuarios normales
       const usersRef = ref(database, "usuarios")
       const snapshot = await get(usersRef)
-      const users = snapshot.val() || {}
+      const users = (snapshot.val() || {}) as Record<string, LegacyUserRecord>
 
       const user = Object.entries(users).find(([id, userData]) => 
-        userData.email.toLowerCase() === email.toLowerCase() && userData.password === password
+        (userData.email || "").toLowerCase() === email.toLowerCase() && userData.password === password
       )
 
       if (user) {
@@ -75,12 +83,20 @@ export default function Home() {
           return
         }
 
+        try {
+          await signInWithEmailAndPassword(auth, email, password)
+        } catch (authError) {
+          console.error("Error al autenticar al usuario común con Firebase Auth:", authError)
+          setError("Tu usuario existe, pero no pudo iniciar sesión en Firebase Auth. Verifica que esté creado también en Authentication.")
+          return
+        }
+
         const normalUser = {
           id: userId,
           uid: userId, // Para compatibilidad
-          email: userData.email,
+          email: userData.email || email,
           role: "user",
-          name: userData.nombre || userData.email,
+          name: userData.nombre || userData.email || email,
           empresa: userData.empresa || "Cliente"
         }
         login(normalUser, false)

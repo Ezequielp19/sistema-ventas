@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react"
 import { auth } from "@/lib/firebase"
-import { signOut } from "firebase/auth"
+import { onAuthStateChanged, signOut, type User as FirebaseAuthUser } from "firebase/auth"
 
 interface User {
   id?: string
@@ -18,6 +18,8 @@ interface AuthContextType {
   isLoggedIn: boolean
   isSuperAdmin: boolean
   isLoading: boolean
+  firebaseUser: FirebaseAuthUser | null
+  firebaseAuthReady: boolean
   login: (userData: User, isAdmin?: boolean) => void
   logout: () => void
 }
@@ -29,6 +31,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [isSessionLoaded, setIsSessionLoaded] = useState(false)
+  const [isFirebaseAuthReady, setIsFirebaseAuthReady] = useState(false)
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseAuthUser | null>(null)
 
   // Función para guardar la sesión en localStorage
   const saveSession = (userData: User, isAdmin = false) => {
@@ -94,20 +99,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     setIsLoggedIn(false)
     setIsSuperAdmin(false)
+    setFirebaseUser(null)
     clearSession()
   }
 
   // Cargar sesión al inicializar
   useEffect(() => {
     loadSession()
-    setIsLoading(false)
+    setIsSessionLoaded(true)
+
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setFirebaseUser(firebaseUser)
+      setIsFirebaseAuthReady(true)
+    })
+
+    return () => unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (isSessionLoaded && isFirebaseAuthReady) {
+      setIsLoading(false)
+    }
+  }, [isSessionLoaded, isFirebaseAuthReady])
 
   const value = {
     user,
     isLoggedIn,
     isSuperAdmin,
     isLoading,
+    firebaseUser,
+    firebaseAuthReady: isFirebaseAuthReady,
     login,
     logout
   }

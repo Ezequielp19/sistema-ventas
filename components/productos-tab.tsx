@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import { useState, useEffect, useRef } from "react"
+import { auth } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -30,7 +31,7 @@ type ProductosTabProps = {
 }
 
 export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
-  const { user } = useAuth()
+  const { user, isLoading, firebaseAuthReady, firebaseUser } = useAuth()
   const { toast } = useToast()
   const [productos, setProductos] = useState<Record<string, Record<string, any>>>({})
   const [showDialog, setShowDialog] = useState(false)
@@ -166,13 +167,23 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
   // Cargar productos desde Firebase
   const cargarProductos = async () => {
     if (!user?.id) return
+
+    if (!auth.currentUser) {
+      console.warn("Firebase Auth todavía no está listo en productos. Se posterga la carga.")
+      return
+    }
+
     const productosActuales = await loadMergedProducts(user.id)
     setProductos(productosActuales)
   }
 
   useEffect(() => {
+    if (isLoading || !firebaseAuthReady || !firebaseUser || !user?.id) {
+      return
+    }
+
     cargarProductos()
-  }, [user?.id])
+  }, [user?.id, isLoading, firebaseAuthReady, firebaseUser?.uid])
 
   // Filtrar productos
   const productosArray: Array<Record<string, any> & { id: string }> = Object.entries(productos).map(([id, producto]) => ({

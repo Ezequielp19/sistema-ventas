@@ -1,9 +1,17 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type FormEvent } from "react"
 import { ref, get, set, push, remove } from "firebase/database"
-import { database, auth } from "@/lib/firebase"
-import { signInWithEmailAndPassword } from "firebase/auth"
+import { initializeApp, getApps } from "firebase/app"
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  getAuth,
+  type User,
+  signInWithEmailAndPassword,
+  signOut,
+} from "firebase/auth"
+import { database, auth, firebaseConfig } from "@/lib/firebase"
 import emailjs from "@emailjs/browser"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,17 +47,65 @@ const EMAILJS_CONFIG = {
 const APP_URL = "https://sistema-ventas-lilac.vercel.app/"
 const SUPER_ADMIN_EMAIL = "adminatenea@software.com"
 const SUPER_ADMIN_PASSWORD = "adminatenea"
+const SECONDARY_AUTH_APP_NAME = "SecondaryAuthApp"
+let emailjsInitialized = false
 
-export default function SuperAdminPanel({ user, onLogout }) {
-  const [usuarios, setUsuarios] = useState({})
+type SuperAdminPanelProps = {
+  user: {
+    email?: string
+  } | null
+  onLogout: () => void
+}
+
+type UserFormData = {
+  nombre: string
+  email: string
+  password: string
+  empresa: string
+  rol: string
+  activo: boolean
+}
+
+type InternalUserRecord = {
+  nombre?: string
+  email?: string
+  password?: string
+  empresa?: string
+  rol?: string
+  role?: string
+  activo?: boolean
+  uid?: string
+  firebaseUid?: string
+  businessId?: string
+  createdAt?: string
+  updatedAt?: string
+  fechaCreacion?: string
+  fechaActualizacion?: string
+  creadoPor?: string
+}
+
+type ErrorDetails = {
+  code: string
+  message: string
+  status?: number
+  text?: string
+}
+
+const secondaryApp =
+  getApps().find((app) => app.name === SECONDARY_AUTH_APP_NAME) ??
+  initializeApp(firebaseConfig, SECONDARY_AUTH_APP_NAME)
+const secondaryAuth = getAuth(secondaryApp)
+
+export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps) {
+  const [usuarios, setUsuarios] = useState<Record<string, InternalUserRecord>>({})
   const [showUserDialog, setShowUserDialog] = useState(false)
-  const [editingUser, setEditingUser] = useState(null)
-  const [copiedPassword, setCopiedPassword] = useState(null)
+  const [editingUser, setEditingUser] = useState<string | null>(null)
+  const [copiedPassword, setCopiedPassword] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [sendingEmail, setSendingEmail] = useState(false)
 
-  const [userFormData, setUserFormData] = useState({
+  const [userFormData, setUserFormData] = useState<UserFormData>({
     nombre: "",
     email: "",
     password: "",
@@ -57,6 +113,83 @@ export default function SuperAdminPanel({ user, onLogout }) {
     rol: "user",
     activo: true
   })
+
+  const normalizeEmail = (value: string) => value.trim().toLowerCase()
+
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+
+  const getErrorDetails = (value: unknown): ErrorDetails => {
+    if (value instanceof Error) {
+      return { code: "", message: value.message }
+    }
+
+    if (value && typeof value === "object") {
+      const errorValue = value as ErrorDetails
+      return {
+        code: errorValue.code || "",
+        message: errorValue.message || errorValue.text || "",
+        status: errorValue.status,
+        text: errorValue.text || "",
+      }
+    }
+
+    return {
+      code: "",
+      message: typeof value === "string" ? value : "Error desconocido",
+    }
+  }
+
+  const mapAuthCreationError = (value: unknown) => {
+    const { code, message } = getErrorDetails(value)
+
+    switch (code) {
+      case "auth/email-already-in-use":
+        return "Ese email ya existe en Firebase Auth"
+      case "auth/weak-password":
+        return "La contraseña debe tener mínimo 6 caracteres"
+      case "auth/invalid-email":
+        return "Email inválido"
+      case "auth/admin-restricted-operation":
+        return "Firebase bloqueó la creación de usuarios. Revisar Authentication settings"
+      default:
+        return code ? `${code}: ${message || "Error desconocido"}` : message || "Error desconocido"
+    }
+  }
+
+  const buildInternalUserRecord = (
+    params: {
+      businessId: string
+      firebaseUid: string
+      formData: UserFormData
+      createdBy?: string
+      previousRecord?: InternalUserRecord
+    },
+  ): InternalUserRecord => {
+    const now = new Date().toISOString()
+    const normalizedName = params.formData.nombre.trim()
+    const normalizedEmail = normalizeEmail(params.formData.email)
+    const normalizedCompany = params.formData.empresa.trim()
+    const normalizedRole = params.formData.rol || "user"
+
+    return {
+      ...(params.previousRecord ?? {}),
+      businessId: params.businessId,
+      uid: params.firebaseUid,
+      firebaseUid: params.firebaseUid,
+      email: normalizedEmail,
+      nombre: normalizedName,
+      password: params.formData.password,
+      empresa: normalizedCompany,
+      rol: normalizedRole,
+      role: normalizedRole,
+      activo: params.formData.activo,
+      createdAt: params.previousRecord?.createdAt || now,
+      updatedAt: now,
+      fechaCreacion: params.previousRecord?.fechaCreacion || now,
+      fechaActualizacion: now,
+      creadoPor: params.previousRecord?.creadoPor || params.createdBy || "",
+    }
+  }
 
   const ensureSuperAdminFirebaseAuth = async () => {
     if (auth.currentUser && !auth.currentUser.isAnonymous && auth.currentUser.email === SUPER_ADMIN_EMAIL) {
@@ -70,7 +203,10 @@ export default function SuperAdminPanel({ user, onLogout }) {
   useEffect(() => {
     // Inicializar EmailJS
     try {
-      emailjs.init(EMAILJS_CONFIG.publicKey)
+      if (!emailjsInitialized) {
+        emailjs.init(EMAILJS_CONFIG.publicKey)
+        emailjsInitialized = true
+      }
       console.log("EmailJS inicializado correctamente")
     } catch (error) {
       console.error("Error al inicializar EmailJS:", error)
@@ -99,10 +235,11 @@ export default function SuperAdminPanel({ user, onLogout }) {
       setError("") // Limpiar errores si la carga es exitosa
     } catch (error) {
       console.error("Error al cargar datos:", error)
-      if (error.code === "PERMISSION_DENIED") {
+      const loadError = getErrorDetails(error)
+      if (loadError.code === "PERMISSION_DENIED") {
         setError("Error de permisos al cargar usuarios. Verifica las reglas de seguridad de Firebase Realtime Database.")
       } else {
-        setError(`Error al cargar los usuarios: ${error.message || "Error desconocido"}`)
+        setError(`Error al cargar los usuarios: ${loadError.message || "Error desconocido"}`)
       }
     }
   }
@@ -116,13 +253,14 @@ export default function SuperAdminPanel({ user, onLogout }) {
     return password
   }
 
-  const sendWelcomeEmail = async (userEmail, userName, userPassword) => {
+  const sendWelcomeEmail = async (userEmail: string, userName: string, userPassword: string): Promise<boolean> => {
     try {
       setSendingEmail(true)
       
       // Verificar que EmailJS esté inicializado
-      if (!emailjs.init) {
+      if (!emailjsInitialized) {
         emailjs.init(EMAILJS_CONFIG.publicKey)
+        emailjsInitialized = true
       }
       
       const templateParams = {
@@ -151,43 +289,15 @@ export default function SuperAdminPanel({ user, onLogout }) {
       console.log("Email enviado exitosamente:", response)
       return true
     } catch (error) {
+      const emailError = getErrorDetails(error)
       console.error("Error detallado al enviar email:", {
         error,
-        status: error?.status,
-        text: error?.text,
-        message: error?.message,
+        status: emailError.status,
+        text: emailError.text,
+        message: emailError.message,
         serviceId: EMAILJS_CONFIG.serviceId,
         templateId: EMAILJS_CONFIG.templateId
       })
-      
-      // El error 412 puede tener diferentes causas
-      if (error?.status === 412) {
-        const errorText = error?.text || error?.message || ''
-        
-        // Error específico de Gmail API
-        if (errorText.includes('Gmail_API') || errorText.includes('Invalid grant') || errorText.includes('reconnect')) {
-          console.error("❌ Error de Gmail API: La cuenta de Gmail necesita ser reconectada en EmailJS")
-          console.error("📋 Solución:")
-          console.error("1. Ve a https://dashboard.emailjs.com/admin/integration")
-          console.error("2. Busca el servicio 'service_f0e608c'")
-          console.error("3. Haz clic en 'Reconnect' o 'Reconectar'")
-          console.error("4. Autoriza nuevamente el acceso a Gmail")
-          console.error("5. Guarda los cambios")
-          
-          // Mostrar mensaje más amigable al usuario
-          setError("Error: La cuenta de Gmail necesita ser reconectada en EmailJS. El usuario se creó correctamente, pero el email no se pudo enviar.")
-        } else {
-          // Otros errores 412
-          console.error("Error 412: Problema con la configuración de EmailJS. Verifica:")
-          console.error("1. Que el template ID sea correcto:", EMAILJS_CONFIG.templateId)
-          console.error("2. Que el servicio ID sea correcto:", EMAILJS_CONFIG.serviceId)
-          console.error("3. Que las variables en el template coincidan con las enviadas")
-          console.error("4. Que el campo 'To Email' esté configurado en el template")
-          console.error("5. Que el servicio de email esté conectado correctamente")
-        }
-      }
-      
-      // No lanzamos el error para que no interrumpa el flujo de creación del usuario
       return false
     } finally {
       setSendingEmail(false)
@@ -208,10 +318,39 @@ export default function SuperAdminPanel({ user, onLogout }) {
     setSuccess("")
   }
 
-  const handleUserSubmit = async (e) => {
+  const handleUserSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError("")
     setSuccess("")
+
+    const normalizedName = userFormData.nombre.trim()
+    const normalizedEmail = normalizeEmail(userFormData.email)
+    const normalizedPassword = userFormData.password.trim()
+
+    if (!normalizedName) {
+      setError("El nombre es obligatorio")
+      return
+    }
+
+    if (!normalizedEmail) {
+      setError("El email es obligatorio")
+      return
+    }
+
+    if (!isValidEmail(normalizedEmail)) {
+      setError("Email inválido")
+      return
+    }
+
+    if (!normalizedPassword) {
+      setError("La contraseña es obligatoria")
+      return
+    }
+
+    if (normalizedPassword.length < 6) {
+      setError("La contraseña debe tener mínimo 6 caracteres")
+      return
+    }
     
     try {
       try {
@@ -223,10 +362,9 @@ export default function SuperAdminPanel({ user, onLogout }) {
       }
 
       // Validar que el email no esté duplicado
-      const normalizedEmail = userFormData.email.trim().toLowerCase()
-      const usuariosArray = Object.entries(usuarios)
+      const usuariosArray: Array<{ id: string } & InternalUserRecord> = Object.entries(usuarios)
         .filter(([, userData]) => typeof userData === "object" && userData !== null)
-        .map(([id, userData]) => ({ id, ...(userData as Record<string, any>) }))
+        .map(([id, userData]) => ({ id, ...(userData as InternalUserRecord) }))
 
       const emailExists = usuariosArray.some((u) => {
         const existingEmail = typeof u.email === "string" ? u.email.trim().toLowerCase() : ""
@@ -238,30 +376,82 @@ export default function SuperAdminPanel({ user, onLogout }) {
         return
       }
 
-      const userData = {
-        ...userFormData,
-        fechaCreacion: new Date().toISOString(),
-        creadoPor: user.email
-      }
-
       if (editingUser) {
+        const now = new Date().toISOString()
+        const previousUser = usuarios[editingUser] || {}
+        const userData = {
+          ...previousUser,
+          nombre: normalizedName,
+          email: normalizedEmail,
+          password: normalizedPassword,
+          empresa: userFormData.empresa.trim(),
+          rol: userFormData.rol || "user",
+          role: userFormData.rol || "user",
+          activo: userFormData.activo,
+          updatedAt: now,
+          fechaActualizacion: now,
+        }
+
         await set(ref(database, `usuarios/${editingUser}`), userData)
         setSuccess("Usuario actualizado correctamente")
-      } else {
-        await push(ref(database, "usuarios"), userData)
-        setSuccess("Usuario creado correctamente")
-        
-        // Enviar email de bienvenida solo cuando se crea un usuario nuevo
-        const emailSent = await sendWelcomeEmail(
-          userFormData.email,
-          userFormData.nombre,
-          userFormData.password
-        )
-        
+        setShowUserDialog(false)
+        resetUserForm()
+        loadData()
+        return
+      }
+
+      let authCreatedUser: User | null = null
+      let internalUserId = ""
+
+      try {
+        const authCredential = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, normalizedPassword)
+        authCreatedUser = authCredential.user
+        const firebaseUid = authCredential.user.uid
+        const newUserRef = push(ref(database, "usuarios"))
+        internalUserId = newUserRef.key || ""
+
+        if (!internalUserId) {
+          throw new Error("No se pudo generar el ID interno del usuario")
+        }
+
+        const userData = buildInternalUserRecord({
+          businessId: internalUserId,
+          firebaseUid,
+          formData: {
+            nombre: normalizedName,
+            email: normalizedEmail,
+            password: normalizedPassword,
+            empresa: userFormData.empresa.trim(),
+            rol: userFormData.rol || "user",
+            activo: userFormData.activo,
+          },
+          createdBy: user?.email || "",
+        })
+
+        await set(newUserRef, userData)
+
+        const emailSent = await sendWelcomeEmail(normalizedEmail, normalizedName, normalizedPassword)
+
         if (emailSent) {
           setSuccess("Usuario creado correctamente. Email de bienvenida enviado.")
         } else {
-          setSuccess("Usuario creado correctamente. (No se pudo enviar el email de bienvenida)")
+          setSuccess("Usuario creado correctamente. Usuario creado, pero no se pudo enviar el email.")
+        }
+      } catch (createError) {
+        if (authCreatedUser) {
+          try {
+            await deleteUser(authCreatedUser)
+          } catch (rollbackError) {
+            console.error("No se pudo revertir el usuario de Auth:", rollbackError)
+          }
+        }
+
+        throw createError
+      } finally {
+        try {
+          await signOut(secondaryAuth)
+        } catch (signOutError) {
+          console.error("No se pudo cerrar la sesión secundaria:", signOutError)
         }
       }
 
@@ -270,15 +460,22 @@ export default function SuperAdminPanel({ user, onLogout }) {
       loadData()
     } catch (error) {
       console.error("Error al guardar usuario:", error)
-      if (error.code === "PERMISSION_DENIED") {
+      const { code, message } = getErrorDetails(error)
+
+      if (code && code.startsWith("auth/")) {
+        setError(mapAuthCreationError(error))
+        return
+      }
+
+      if (code === "PERMISSION_DENIED") {
         setError("Error de permisos. Verifica las reglas de seguridad de Firebase Realtime Database.")
       } else {
-        setError(`Error al guardar el usuario: ${error.message || "Error desconocido"}`)
+        setError(`Error al guardar el usuario: ${code ? `${code}: ${message || "Error desconocido"}` : message || "Error desconocido"}`)
       }
     }
   }
 
-  const handleEditUser = (id, userData) => {
+  const handleEditUser = (id: string, userData: InternalUserRecord) => {
     setEditingUser(id)
     setUserFormData({
       nombre: userData.nombre || "",
@@ -291,7 +488,7 @@ export default function SuperAdminPanel({ user, onLogout }) {
     setShowUserDialog(true)
   }
 
-  const handleDeleteUser = async (id) => {
+  const handleDeleteUser = async (id: string) => {
     if (confirm("¿Estás seguro de eliminar este usuario?")) {
       try {
         await ensureSuperAdminFirebaseAuth()
@@ -301,7 +498,8 @@ export default function SuperAdminPanel({ user, onLogout }) {
         loadData()
       } catch (error) {
         console.error("Error al eliminar usuario:", error)
-        if (error.code === "PERMISSION_DENIED") {
+        const errorDetails = getErrorDetails(error)
+        if (errorDetails.code === "PERMISSION_DENIED") {
           setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
         } else {
           setError("Error al eliminar el usuario")
@@ -310,7 +508,7 @@ export default function SuperAdminPanel({ user, onLogout }) {
     }
   }
 
-  const handleToggleUserStatus = async (id, userData) => {
+  const handleToggleUserStatus = async (id: string, userData: InternalUserRecord) => {
     const newStatus = !userData.activo
     const statusText = newStatus ? "activado" : "desactivado"
     
@@ -323,7 +521,8 @@ export default function SuperAdminPanel({ user, onLogout }) {
         loadData()
       } catch (error) {
         console.error("Error al cambiar estado del usuario:", error)
-        if (error.code === "PERMISSION_DENIED") {
+        const errorDetails = getErrorDetails(error)
+        if (errorDetails.code === "PERMISSION_DENIED") {
           setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
         } else {
           setError("Error al cambiar el estado del usuario")
@@ -332,7 +531,7 @@ export default function SuperAdminPanel({ user, onLogout }) {
     }
   }
 
-  const copyPassword = async (password) => {
+  const copyPassword = async (password: string) => {
     try {
       await navigator.clipboard.writeText(password)
       setCopiedPassword(password)
@@ -342,9 +541,9 @@ export default function SuperAdminPanel({ user, onLogout }) {
     }
   }
 
-  const usuariosArray = Object.entries(usuarios).map(([id, userData]) => ({
+  const usuariosArray: Array<{ id: string } & InternalUserRecord> = Object.entries(usuarios).map(([id, userData]) => ({
     id,
-    ...userData,
+    ...(userData as InternalUserRecord),
   }))
 
   const usuariosActivos = usuariosArray.filter(user => user.activo !== false)
@@ -593,7 +792,7 @@ export default function SuperAdminPanel({ user, onLogout }) {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => copyPassword(userData.password)}
+                              onClick={() => copyPassword(userData.password || "")}
                             >
                               {copiedPassword === userData.password ? (
                                 <CheckCircle className="h-4 w-4 text-green-500" />

@@ -13,16 +13,25 @@ import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
-import { adjustProductPricesByProvider, createProvider, deleteProvider, saveProvider } from "@/src/services/providers.service"
+import { auth } from "@/lib/firebase"
+import {
+  adjustProductPricesByProvider,
+  createProvider,
+  deleteProvider,
+  loadProviders,
+  saveProvider,
+  type ProviderCollection,
+} from "@/src/services/providers.service"
 
 export default function ProveedoresTab({ proveedores, productos }: { proveedores: any, productos: any }) {
-  const { user } = useAuth()
+  const { user, isLoading, firebaseAuthReady, firebaseUser } = useAuth()
   const [showDialog, setShowDialog] = useState(false)
   const [showPriceDialog, setShowPriceDialog] = useState(false)
   const [editingProveedor, setEditingProveedor] = useState<string | null>(null)
   const [selectedProveedor, setSelectedProveedor] = useState<string | null>(null)
   const [porcentajeAjuste, setPorcentajeAjuste] = useState("")
   const [tipoAjuste, setTipoAjuste] = useState("aumento") // "aumento" o "reduccion"
+  const [proveedoresFirestore, setProveedoresFirestore] = useState<ProviderCollection>(proveedores || {})
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1)
@@ -47,6 +56,52 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
     setEditingProveedor(null)
   }
 
+  useEffect(() => {
+    if (isLoading || !firebaseAuthReady || !firebaseUser || !user?.id) {
+      return
+    }
+
+    const businessId = user.id
+    let isMounted = true
+
+    const loadFirestoreProviders = async () => {
+      try {
+        if (!auth.currentUser) {
+          console.warn("Firebase Auth todavía no está listo en proveedores. Se posterga la carga.")
+          return
+        }
+
+        const loadedProviders = await loadProviders(businessId)
+        if (isMounted) {
+          setProveedoresFirestore(loadedProviders)
+        }
+      } catch (error) {
+        console.error("Error al cargar proveedores:", error)
+      }
+    }
+
+    loadFirestoreProviders()
+
+    return () => {
+      isMounted = false
+    }
+  }, [user?.id, isLoading, firebaseAuthReady, firebaseUser?.uid])
+
+  const refreshProviders = async () => {
+    if (!user?.id) {
+      return
+    }
+
+    const businessId = user.id
+    if (!firebaseAuthReady || !firebaseUser || !auth.currentUser) {
+      console.warn("Firebase Auth todavía no está listo para refrescar proveedores.")
+      return
+    }
+
+    const loadedProviders = await loadProviders(businessId)
+    setProveedoresFirestore(loadedProviders)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -67,6 +122,7 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
         await createProvider(user.id, proveedorData)
       }
 
+      await refreshProviders()
       setShowDialog(false)
       resetForm()
     } catch (error) {
@@ -76,7 +132,13 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
 
   const handleEdit = (id: string, proveedor: any) => {
     setEditingProveedor(id)
-    setFormData(proveedor)
+    setFormData({
+      nombre: proveedor.nombre || "",
+      contacto: proveedor.contacto || "",
+      telefono: proveedor.telefono || "",
+      email: proveedor.email || "",
+      direccion: proveedor.direccion || "",
+    })
     setShowDialog(true)
   }
 
@@ -89,6 +151,7 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
     if (confirm("¿Estás seguro de eliminar este proveedor?")) {
       try {
         await deleteProvider(user.id, id)
+        await refreshProviders()
       } catch (error) {
         console.error("Error al eliminar proveedor:", error)
       }
@@ -122,7 +185,7 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
   }
 
   // Paginación
-  const proveedoresArray = Object.entries(proveedores || {}).map(([id, proveedor]: [string, any]) => ({
+  const proveedoresArray = Object.entries(proveedoresFirestore || {}).map(([id, proveedor]: [string, any]) => ({
     id,
     ...proveedor,
   }))
@@ -422,7 +485,11 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
               <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
                 <p className="font-semibold text-blue-800 dark:text-blue-200 text-sm sm:text-base">
                   Proveedor:{" "}
-                  {selectedProveedor === "todos" ? "🌟 TODOS LOS PROVEEDORES" : (proveedores && selectedProveedor ? proveedores[selectedProveedor]?.nombre : "")}
+                  {selectedProveedor === "todos"
+                    ? "🌟 TODOS LOS PROVEEDORES"
+                    : selectedProveedor
+                      ? proveedoresFirestore[selectedProveedor]?.nombre
+                      : ""}
                 </p>
                 <p className="text-blue-700 dark:text-blue-300 text-xs sm:text-sm mt-1">
                   Productos afectados: <strong>{selectedProveedor ? getProductosCount(selectedProveedor) : 0}</strong>
