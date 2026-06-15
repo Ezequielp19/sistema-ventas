@@ -1,13 +1,13 @@
-"use client"
+﻿"use client"
 
-import { useState, useEffect, useMemo } from "react"
-import { ref, onValue, off } from "firebase/database"
+import { useState, useEffect } from "react"
+import { ref, onValue } from "firebase/database"
 import { database } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { LogOut, Package, Users, ShoppingCart, AlertTriangle, Menu, ChevronDown, ChevronUp, Building, FileText, Store } from "lucide-react"
+import { LogOut, Package, Users, ShoppingCart, AlertTriangle, Menu, ChevronDown, ChevronUp, Building, Store } from "lucide-react"
 import { Sheet, SheetContent, SheetTrigger, SheetClose } from "@/components/ui/sheet"
 import { ThemeToggle } from "@/components/theme-toggle"
 import ProductosTab from "@/components/productos-tab"
@@ -19,103 +19,90 @@ import CustomReports from "@/components/custom-reports"
 import FacturacionTab from "@/components/facturacion-tab"
 import TiendaTab from "@/components/tienda-tab"
 import DataMigration from "@/components/data-migration"
-import { useOptimizedRealtimeData } from "@/hooks/useOptimizedQueries"
-import { mergePublicCatalogCollections } from "@/lib/product-sync"
+import { useAuth } from "@/contexts/auth-context"
+import { loadDashboardSummary, type DashboardSummary } from "@/src/services/dashboard.service"
 
-export default function Dashboard({ user, onLogout }) {
+const emptyDashboardSummary: DashboardSummary = {
+  products: {},
+  providers: {},
+  sales: {},
+  metrics: {
+    totalProductos: 0,
+    totalProveedores: 0,
+    totalVentas: 0,
+    ventasHoy: 0,
+    ventasMes: 0,
+    ganancias: 0,
+    stockBajo: [],
+    ultimasVentas: [],
+  },
+  legacySources: {
+    products: false,
+    providers: false,
+    sales: false,
+  },
+}
+
+type DashboardUser = {
+  id?: string
+  uid?: string
+  email?: string
+  name?: string
+  empresa?: string
+}
+
+type CompanyInfo = {
+  nombre?: string
+  plan?: string
+  [key: string]: any
+}
+
+export default function Dashboard({ user, onLogout }: { user: DashboardUser | null; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState("productos")
   const [triggerNewSale, setTriggerNewSale] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [stockAlertsMinimized, setStockAlertsMinimized] = useState(false)
-  const [empresaInfo, setEmpresaInfo] = useState(null)
-  const [showMigration, setShowMigration] = useState(false)
+  const [empresaInfo, setEmpresaInfo] = useState<CompanyInfo | null>(null)
+  const { firebaseAuthReady, firebaseUser, isLoading: authLoading } = useAuth()
+  const [dashboardData, setDashboardData] = useState<DashboardSummary>(emptyDashboardSummary)
+  const businessId = user?.id || user?.uid || firebaseUser?.uid || ""
 
-  // Usar consultas optimizadas con filtro por usuario
-  const { data: productos, loading: productosLoading } = useOptimizedRealtimeData(`usuarios/${user?.id}/productos`)
-  const { data: tiendaProductos, loading: tiendaProductosLoading } = useOptimizedRealtimeData(`tiendas/${user?.id}/productos`)
-  const { data: proveedores, loading: proveedoresLoading } = useOptimizedRealtimeData(`usuarios/${user?.id}/proveedores`)
-  const { data: ventas, loading: ventasLoading } = useOptimizedRealtimeData(`usuarios/${user?.id}/ventas`)
-
-  // Verificar si hay datos en el formato anterior
   useEffect(() => {
-    const checkOldData = async () => {
+    if (authLoading || !firebaseAuthReady || !firebaseUser || !businessId) {
+      return
+    }
+
+    let isMounted = true
+
+    const loadData = async () => {
       try {
-        const oldProductosRef = ref(database, "productos")
-        const oldProductosSnapshot = await onValue(oldProductosRef, (snapshot) => {
-          if (snapshot.exists() && Object.keys(productos || {}).length === 0) {
-            setShowMigration(true)
-          }
-        })
-        return () => off(oldProductosRef, 'value', oldProductosSnapshot)
+        const summary = await loadDashboardSummary(businessId)
+        if (isMounted) {
+          setDashboardData(summary)
+        }
       } catch (error) {
-        console.error("Error verificando datos antiguos:", error)
-      }
-    }
-    
-    if (user?.id) {
-      checkOldData()
-    }
-  }, [user, productos])
-
-  // Cargar información de la empresa si el usuario tiene una
-  useEffect(() => {
-    if (user?.empresa) {
-      const empresaRef = ref(database, `empresas/${user.empresa}`)
-      const unsubscribeEmpresa = onValue(empresaRef, (snapshot) => {
-        setEmpresaInfo(snapshot.val())
-      })
-      return () => unsubscribeEmpresa()
-    }
-  }, [user])
-
-  // Escuchar teclas de función
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === "F1") {
-        event.preventDefault()
-        setActiveTab("ventas")
-        setTriggerNewSale(true)
-        setTimeout(() => setTriggerNewSale(false), 100)
-      } else if (event.key === "F2") {
-        event.preventDefault()
-        setActiveTab("proveedores")
-      } else if (event.key === "F3") {
-        event.preventDefault()
-        setActiveTab("productos")
-      } else if (event.key === "F7") {
-        event.preventDefault()
-        setActiveTab("reportes")
-      } else if (event.key === "F8") {
-        event.preventDefault()
-        setActiveTab("facturacion")
+        console.error("Error al cargar el resumen del dashboard:", error)
+        if (isMounted) {
+          setDashboardData(emptyDashboardSummary)
+        }
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [])
+    setDashboardData(emptyDashboardSummary)
+    loadData()
 
-  // Cálculos optimizados con useMemo
-  const productosParaVista = useMemo(
-    () => mergePublicCatalogCollections(productos || {}, tiendaProductos || {}),
-    [productos, tiendaProductos],
-  )
-
-  const { totalProductos, totalProveedores, totalVentas, stockBajo } = useMemo(() => {
-    const productosArray = Object.entries(productosParaVista || {}).map(([id, producto]) => ({
-      id,
-      ...producto,
-    }))
-    
-    const stockBajoItems = productosArray.filter((p) => p.stock <= p.stockMinimo)
-    
-    return {
-      totalProductos: Object.keys(productosParaVista || {}).length,
-      totalProveedores: Object.keys(proveedores || {}).length,
-      totalVentas: Object.values(ventas || {}).reduce((sum, venta) => sum + (venta.total || 0), 0),
-      stockBajo: stockBajoItems
+    return () => {
+      isMounted = false
     }
-  }, [productosParaVista, proveedores, ventas])
+  }, [businessId, authLoading, firebaseAuthReady, firebaseUser?.uid])
+
+  const showMigration =
+    dashboardData.legacySources.products ||
+    dashboardData.legacySources.providers ||
+    dashboardData.legacySources.sales
+
+  const { products, providers, sales, metrics } = dashboardData
+  const { totalProductos, totalProveedores, totalVentas, stockBajo } = metrics
 
   const TabsNavigation = ({ isMobile = false }) => {
     const handleTabClick = (value: string) => {
@@ -126,7 +113,7 @@ export default function Dashboard({ user, onLogout }) {
     }
 
     if (isMobile) {
-      // En móvil, usar botones simples en lugar de TabsTrigger
+      // En mÃ³vil, usar botones simples en lugar de TabsTrigger
       return (
         <div className="grid grid-cols-2 gap-2">
           <SheetClose asChild>
@@ -199,7 +186,7 @@ export default function Dashboard({ user, onLogout }) {
               className="w-full justify-start"
               onClick={() => handleTabClick("facturacion")}
             >
-              Facturación
+              FacturaciÃ³n
             </Button>
           </SheetClose>
         </div>
@@ -236,7 +223,7 @@ export default function Dashboard({ user, onLogout }) {
           <span className="hidden sm:inline">Personalizados</span>
         </TabsTrigger>
         <TabsTrigger value="facturacion">
-          <span className="hidden sm:inline">Facturación</span>
+          <span className="hidden sm:inline">FacturaciÃ³n</span>
           <span className="sm:hidden">F8</span>
         </TabsTrigger>
       </TabsList>
@@ -277,7 +264,7 @@ export default function Dashboard({ user, onLogout }) {
                   F7 = Reportes
                 </Badge>
                 <Badge variant="outline" className="text-xs">
-                  F8 = Facturación
+                  F8 = FacturaciÃ³n
                 </Badge>
               </div>
               <span className="text-sm text-muted-foreground hidden xl:block">
@@ -286,7 +273,7 @@ export default function Dashboard({ user, onLogout }) {
               <ThemeToggle />
               <Button variant="outline" onClick={onLogout} size="sm">
                 <LogOut className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Cerrar Sesión</span>
+                <span className="hidden sm:inline">Cerrar SesiÃ³n</span>
               </Button>
             </div>
 
@@ -305,7 +292,7 @@ export default function Dashboard({ user, onLogout }) {
                 <SheetContent side="right" className="w-80">
                   <div className="space-y-4">
                     <div className="text-center">
-                      <h2 className="text-lg font-semibold">Navegación</h2>
+                      <h2 className="text-lg font-semibold">NavegaciÃ³n</h2>
                       <p className="text-sm text-muted-foreground">{user?.name || user?.email}</p>
                       {empresaInfo && (
                         <div className="mt-2 flex items-center justify-center space-x-2">
@@ -333,14 +320,14 @@ export default function Dashboard({ user, onLogout }) {
       </header>
 
       <main className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 sm:py-8">
-        {/* Migración de datos */}
+        {/* MigraciÃ³n de datos */}
         {showMigration && (
           <div className="mb-6">
             <DataMigration />
           </div>
         )}
 
-        {/* Alertas de Stock Bajo con opción de minimizar/maximizar */}
+        {/* Alertas de Stock Bajo con opciÃ³n de minimizar/maximizar */}
         {stockBajo.length > 0 && (
           <div className="mb-4 sm:mb-6">
             <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950">
@@ -370,13 +357,13 @@ export default function Dashboard({ user, onLogout }) {
                       >
                         <span className="font-medium text-sm">{producto.nombre}</span>
                         <Badge variant="destructive" className="text-xs w-fit">
-                          Stock: {producto.stock} (Mín: {producto.stockMinimo})
+                          Stock: {producto.stock} (MÃ­n: {producto.stockMinimo})
                         </Badge>
                       </div>
                     ))}
                     {stockBajo.length > 3 && (
                       <p className="text-sm text-red-700 dark:text-red-300">
-                        Y {stockBajo.length - 3} productos más...
+                        Y {stockBajo.length - 3} productos mÃ¡s...
                       </p>
                     )}
                   </div>
@@ -386,7 +373,7 @@ export default function Dashboard({ user, onLogout }) {
           </div>
         )}
 
-        {/* Estadísticas */}
+        {/* EstadÃ­sticas */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -444,12 +431,12 @@ export default function Dashboard({ user, onLogout }) {
                 <SheetTrigger asChild>
                   <Button variant="outline" size="sm">
                     <Menu className="h-4 w-4 mr-2" />
-                    Cambiar Sección
+                    Cambiar SecciÃ³n
                   </Button>
                 </SheetTrigger>
                 <SheetContent side="right" className="w-80">
                   <div className="space-y-4">
-                    <h2 className="text-lg font-semibold">Seleccionar Sección</h2>
+                    <h2 className="text-lg font-semibold">Seleccionar SecciÃ³n</h2>
                     <TabsNavigation isMobile={true} />
                   </div>
                 </SheetContent>
@@ -458,43 +445,46 @@ export default function Dashboard({ user, onLogout }) {
           </div>
 
           <TabsContent value="productos">
-            <ProductosTab productos={productosParaVista} proveedores={proveedores} />
+            <ProductosTab proveedores={providers} />
           </TabsContent>
 
           <TabsContent value="proveedores">
-            <ProveedoresTab proveedores={proveedores} productos={productosParaVista} />
+            <ProveedoresTab proveedores={providers} productos={products} />
           </TabsContent>
 
           <TabsContent value="ventas">
             <VentasTab
-              productos={productosParaVista}
-              ventas={ventas}
-              proveedores={proveedores}
+              productos={products}
+              ventas={sales}
+              proveedores={providers}
               triggerNewSale={triggerNewSale}
             />
           </TabsContent>
 
-                  <TabsContent value="tienda">
-          <TiendaTab productos={productosParaVista} user={user} />
-        </TabsContent>
+          <TabsContent value="tienda">
+            <TiendaTab productos={products as any} user={user as any} />
+          </TabsContent>
 
           <TabsContent value="stock">
-            <StockTab productos={productosParaVista} stockBajo={stockBajo} />
+            <StockTab productos={products} stockBajo={stockBajo} />
           </TabsContent>
 
           <TabsContent value="reportes">
-            <ReportesTab ventas={ventas} productos={productosParaVista} proveedores={proveedores} />
+            <ReportesTab ventas={sales} productos={products} proveedores={providers} />
           </TabsContent>
 
           <TabsContent value="personalizados">
-            <CustomReports ventas={ventas} productos={productosParaVista} proveedores={proveedores} />
+            <CustomReports ventas={sales} productos={products} proveedores={providers} />
           </TabsContent>
 
           <TabsContent value="facturacion">
-            <FacturacionTab ventas={ventas} productos={productosParaVista} proveedores={proveedores} />
+            <FacturacionTab ventas={sales} productos={products} proveedores={providers} />
           </TabsContent>
         </Tabs>
       </main>
     </div>
   )
 }
+
+
+
