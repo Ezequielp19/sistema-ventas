@@ -14,14 +14,67 @@ import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
-import { deleteSaleAndRestoreStock, processSale } from "@/src/services/sales.service"
+import { deleteSaleAndRestoreStock, processSale, type SaleCollection, type SaleRecord } from "@/src/services/sales.service"
+import { type ProductCollection, type ProductRecord } from "@/src/services/products.service"
 
-export default function VentasTab({ productos, ventas, proveedores, triggerNewSale }) {
+type CartItem = {
+  id: string
+  nombre: string
+  precio: number
+  precioCompra: number
+  cantidad: number
+  stockDisponible: number
+}
+
+type PaymentItem = {
+  metodo: string
+  monto: string
+}
+
+type ProviderRecord = {
+  nombre?: string
+  [key: string]: unknown
+}
+
+type SaleItemRow = {
+  id?: string
+  productId?: string
+  nombre: string
+  cantidad: number
+  precioUnitario?: number
+  subtotal?: number
+}
+
+type SalePaymentRow = {
+  metodo: string
+  monto: string | number
+}
+
+type VentasTabProps = {
+  productos: ProductCollection
+  ventas: SaleCollection
+  proveedores: Record<string, ProviderRecord>
+  triggerNewSale: boolean
+}
+
+type ProductRow = ProductRecord & { id: string }
+type SaleRow = {
+  id: string
+  fecha?: string
+  cliente?: string
+  items?: SaleItemRow[]
+  pagos?: SalePaymentRow[]
+  metodoPago?: string
+  total?: number
+  [key: string]: unknown
+}
+
+export default function VentasTab({ productos, ventas, proveedores, triggerNewSale }: VentasTabProps) {
   const { user } = useAuth()
   const [showDialog, setShowDialog] = useState(false)
-  const [carrito, setCarrito] = useState([])
+  const [carrito, setCarrito] = useState<CartItem[]>([])
   const [cliente, setCliente] = useState("")
-  const [pagos, setPagos] = useState([])
+  const [pagos, setPagos] = useState<PaymentItem[]>([])
 
   // Estados para filtros
   const [searchTerm, setSearchTerm] = useState("")
@@ -51,7 +104,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
     }
   }, [triggerNewSale])
 
-  const agregarAlCarrito = (productoId) => {
+  const agregarAlCarrito = (productoId: string) => {
     const producto = productos[productoId]
     if (!producto || producto.stock <= 0) return
 
@@ -67,20 +120,20 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
         {
           id: productoId,
           nombre: producto.nombre,
-          precio: producto.precioVenta || producto.precio,
-          precioCompra: producto.precioCompra || producto.precio,
+          precio: Number(producto.precioVenta ?? producto.precio ?? 0),
+          precioCompra: Number(producto.precioCompra ?? producto.precio ?? 0),
           cantidad: 1,
-          stockDisponible: producto.stock,
+          stockDisponible: Number(producto.stock ?? 0),
         },
       ])
     }
   }
 
-  const removerDelCarrito = (productoId) => {
+  const removerDelCarrito = (productoId: string) => {
     setCarrito(carrito.filter((item) => item.id !== productoId))
   }
 
-  const actualizarCantidad = (productoId, nuevaCantidad) => {
+  const actualizarCantidad = (productoId: string, nuevaCantidad: number) => {
     if (nuevaCantidad <= 0) {
       removerDelCarrito(productoId)
       return
@@ -104,13 +157,13 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
     setPagos([...pagos, { metodo: "", monto: "" }])
   }
 
-  const actualizarPago = (index, campo, valor) => {
+  const actualizarPago = (index: number, campo: keyof PaymentItem, valor: string) => {
     const nuevosPagos = [...pagos]
     nuevosPagos[index][campo] = valor
     setPagos(nuevosPagos)
   }
 
-  const removerPago = (index) => {
+  const removerPago = (index: number) => {
     setPagos(pagos.filter((_, i) => i !== index))
   }
 
@@ -160,7 +213,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
     }
   }
 
-  const eliminarVenta = async (ventaId, venta) => {
+  const eliminarVenta = async (ventaId: string, venta: SaleRow) => {
     if (!user?.id) {
       console.error("Usuario no autenticado")
       return
@@ -191,9 +244,9 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
   }
 
   // Filtrar productos
-  const productosArray = Object.entries(productos).map(([id, producto]) => ({
+  const productosArray: ProductRow[] = Object.entries(productos).map(([id, producto]) => ({
     id,
-    ...producto,
+    ...(producto as ProductRecord),
   }))
 
   const filteredProducts = productosArray.filter((producto) => {
@@ -216,26 +269,28 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
   })
 
   // Obtener tipos únicos de productos con stock
-  const tiposUnicos = [
+  const tiposUnicos: string[] = [
     ...new Set(
       productosArray
         .filter((p) => p.stock > 0)
         .map((p) => p.tipo)
-        .filter(Boolean),
+        .filter((tipo): tipo is string => Boolean(tipo)),
     ),
   ]
 
   // Obtener proveedores que tienen productos con stock
-  const proveedoresConStock = Object.entries(proveedores || {}).filter(([id]) =>
+  const proveedoresConStock = (Object.entries(proveedores || {}) as Array<[string, ProviderRecord]>).filter(([id]) =>
     productosArray.some((p) => p.proveedor === id && p.stock > 0),
   )
 
-  const ventasArray = Object.entries(ventas || {})
-    .map(([id, venta]) => ({
+  const ventasArray = (
+    (Object.entries(ventas || {}) as Array<[string, Omit<SaleRow, "id">]>).map(([id, venta]) => ({
       id,
       ...venta,
     }))
-    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+  ) as SaleRow[]
+
+  ventasArray.sort((a, b) => new Date(b.fecha ?? 0).getTime() - new Date(a.fecha ?? 0).getTime())
 
   // Paginación para ventas
   const totalPages = Math.ceil(ventasArray.length / itemsPerPage)
@@ -620,7 +675,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                 ) : (
                   currentItems.map((venta) => (
                     <TableRow key={venta.id}>
-                      <TableCell>{new Date(venta.fecha).toLocaleDateString()}</TableCell>
+                      <TableCell>{new Date(String(venta.fecha ?? "")).toLocaleDateString()}</TableCell>
                       <TableCell className="font-medium">{venta.cliente}</TableCell>
                       <TableCell>
                         <div className="space-y-1">
@@ -639,7 +694,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                                 <Badge variant="outline" className="capitalize text-xs">
                                   {pago.metodo}
                                 </Badge>
-                                <span className="text-xs">${Number.parseFloat(pago.monto).toFixed(2)}</span>
+                                <span className="text-xs">${Number.parseFloat(String(pago.monto)).toFixed(2)}</span>
                               </div>
                             ))
                           ) : (
@@ -682,7 +737,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                       <div className="flex justify-between items-start gap-2">
                         <div className="flex-1">
                           <div className="text-xs text-muted-foreground">
-                            {new Date(venta.fecha).toLocaleDateString()}
+                            {new Date(String(venta.fecha ?? "")).toLocaleDateString()}
                           </div>
                           <h3 className="font-semibold text-base mt-1">{venta.cliente}</h3>
                         </div>
@@ -713,7 +768,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                                 <Badge variant="outline" className="capitalize text-xs">
                                   {pago.metodo}
                                 </Badge>
-                                <span className="text-xs">${Number.parseFloat(pago.monto).toFixed(2)}</span>
+                                <span className="text-xs">${Number.parseFloat(String(pago.monto)).toFixed(2)}</span>
                               </div>
                             ))
                           ) : (

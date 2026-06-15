@@ -13,12 +13,19 @@ import { Plus, Package, ChevronDown, ChevronUp, X } from "lucide-react"
 import { Pagination } from "@/components/ui/pagination"
 import HelpTooltip from "./help-tooltip"
 import { useAuth } from "@/contexts/auth-context"
-import { setProductStock } from "@/src/services/products.service"
+import { setProductStock, type ProductCollection, type ProductRecord } from "@/src/services/products.service"
 
-export default function StockTab({ productos, stockBajo }) {
+type StockTabProps = {
+  productos: ProductCollection
+  stockBajo: Array<ProductRecord & { id: string }>
+}
+
+type ProductRow = ProductRecord & { id: string }
+
+export default function StockTab({ productos, stockBajo }: StockTabProps) {
   const { user } = useAuth()
   const [showDialog, setShowDialog] = useState(false)
-  const [selectedProduct, setSelectedProduct] = useState(null)
+  const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
   const [cantidadAgregar, setCantidadAgregar] = useState("")
   const [stockAlertsMinimized, setStockAlertsMinimized] = useState(false)
 
@@ -52,9 +59,9 @@ export default function StockTab({ productos, stockBajo }) {
     setFilterStock("")
   }
 
-  const productosArray = Object.entries(productos).map(([id, producto]) => ({
+  const productosArray: ProductRow[] = Object.entries(productos).map(([id, producto]) => ({
     id,
-    ...producto,
+    ...(producto as ProductRecord),
   }))
 
   // Filtrar productos
@@ -83,6 +90,7 @@ export default function StockTab({ productos, stockBajo }) {
   // Paginación
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage)
   const currentItems = filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+  const selectedProductData = selectedProduct ? productos[selectedProduct] : null
 
   // Cuando cambian los filtros, volver a la primera página
   useEffect(() => {
@@ -352,15 +360,15 @@ export default function StockTab({ productos, stockBajo }) {
             {selectedProduct && (
               <>
                 <div className="space-y-2 text-sm sm:text-base">
-                  <p>
-                    <strong>Producto:</strong> {productos[selectedProduct]?.nombre}
-                  </p>
-                  <p>
-                    <strong>Stock actual:</strong> {productos[selectedProduct]?.stock}
-                  </p>
-                  <p>
-                    <strong>Stock mínimo:</strong> {productos[selectedProduct]?.stockMinimo}
-                  </p>
+                    <p>
+                      <strong>Producto:</strong> {selectedProductData?.nombre}
+                    </p>
+                    <p>
+                      <strong>Stock actual:</strong> {selectedProductData?.stock}
+                    </p>
+                    <p>
+                      <strong>Stock mínimo:</strong> {selectedProductData?.stockMinimo}
+                    </p>
                 </div>
                 <div>
                   <Label htmlFor="cantidad" className="text-sm">Cantidad a agregar</Label>
@@ -378,7 +386,7 @@ export default function StockTab({ productos, stockBajo }) {
                   <div className="p-3 sm:p-4 bg-muted rounded">
                     <p className="text-sm sm:text-base">
                       <strong>Nuevo stock:</strong>{" "}
-                      {productos[selectedProduct]?.stock + Number.parseInt(cantidadAgregar || 0)}
+                      {(selectedProductData?.stock ?? 0) + Number.parseInt(cantidadAgregar || "0", 10)}
                     </p>
                   </div>
                 )}
