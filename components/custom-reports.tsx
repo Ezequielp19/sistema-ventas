@@ -113,7 +113,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
 
   // Función para generar datos del reporte
   const generateReportData = (report: CustomReport) => {
-    return buildPeriodSalesReport(ventas || {}, report.configuracion.periodo)
+    return buildPeriodSalesReport(ventas || {}, report.configuracion.periodo, productos || {})
 
     const currentDate = new Date()
     let startDate: Date
@@ -146,14 +146,20 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
 
     // Calcular métricas
     const metricas = {
-      totalVentas: ventasPeriodo.reduce((sum, v) => sum + v.total, 0),
+      totalVentas: ventasPeriodo.reduce((sum: number, v: any) => sum + v.total, 0),
       cantidadVentas: ventasPeriodo.length,
-      promedioVenta: ventasPeriodo.length > 0 ? ventasPeriodo.reduce((sum, v) => sum + v.total, 0) / ventasPeriodo.length : 0,
-      productosVendidos: ventasPeriodo.reduce((sum, v) => sum + (v.items?.reduce((s, i) => s + i.cantidad, 0) || 0), 0)
+      promedioVenta:
+        ventasPeriodo.length > 0
+          ? ventasPeriodo.reduce((sum: number, v: any) => sum + v.total, 0) / ventasPeriodo.length
+          : 0,
+      productosVendidos: ventasPeriodo.reduce(
+        (sum: number, v: any) => sum + (v.items?.reduce((itemsSum: number, item: any) => itemsSum + item.cantidad, 0) || 0),
+        0,
+      )
     }
 
     // Datos para gráficos
-    const datosGrafico = ventasPeriodo.reduce((acc, venta) => {
+    const datosGrafico = ventasPeriodo.reduce((acc: Record<string, any>, venta: any) => {
       const fecha = venta.fecha.toLocaleDateString('es-ES', { 
         month: 'short', 
         day: 'numeric' 
@@ -177,7 +183,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
 
   // Función para comparar períodos
   const generateComparisonData = (report: CustomReport) => {
-    return buildComparisonSalesReport(ventas || {}, report.configuracion.periodo)
+    return buildComparisonSalesReport(ventas || {}, report.configuracion.periodo, productos || {})
 
     const currentDate = new Date()
     let currentPeriod: { start: Date, end: Date }
@@ -578,12 +584,12 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {generateReportData(selectedReport).ventasPeriodo.map((venta) => (
+                        {generateReportData(selectedReport).ventasPeriodo.map((venta: any) => (
                           <TableRow key={venta.id}>
                             <TableCell>{venta.fecha.toLocaleDateString()}</TableCell>
                             <TableCell>{venta.cliente}</TableCell>
                             <TableCell>
-                              {venta.items?.map((item, index) => (
+                              {venta.items?.map((item: any, index: number) => (
                                 <div key={index} className="text-sm">
                                   {item.nombre} x{item.cantidad}
                                 </div>
@@ -601,6 +607,9 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
               {selectedReport.configuracion.comparacion && (
                 <TabsContent value="comparativa" className="space-y-4">
                   <AdvancedComparisons 
+                    ventas={ventas}
+                    productos={productos}
+                    proveedores={proveedores}
                     actual={generateComparisonData(selectedReport).actual} 
                     anterior={generateComparisonData(selectedReport).anterior} 
                     variaciones={generateComparisonData(selectedReport).variaciones} 

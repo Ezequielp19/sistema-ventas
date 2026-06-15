@@ -10,7 +10,7 @@ import { BarChart3, TrendingUp, Calendar, DollarSign, ShoppingCart, Target } fro
 import { Pagination } from "@/components/ui/pagination"
 import ExportButtons from "./export-buttons"
 import HelpTooltip from "./help-tooltip"
-import { buildMonthlySalesReport } from "@/src/services/reports.service"
+import { buildDailySalesReport, buildMonthlySalesReport } from "@/src/services/reports.service"
 
 interface ReportesTabProps {
   ventas: Record<string, any>
@@ -32,9 +32,27 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
   const [ventasDelDiaSeleccionado, setVentasDelDiaSeleccionado] = useState<any[]>([])
 
   const monthlyReport = useMemo(
-    () => buildMonthlySalesReport(ventas || {}, Number.parseInt(selectedMonth), Number.parseInt(selectedYear)),
-    [ventas, selectedMonth, selectedYear],
+    () =>
+      buildMonthlySalesReport(
+        ventas || {},
+        Number.parseInt(selectedMonth),
+        Number.parseInt(selectedYear),
+        productos || {},
+      ),
+    [ventas, selectedMonth, selectedYear, productos],
   ) as ReturnType<typeof buildMonthlySalesReport>
+
+  const selectedDayReport = useMemo(() => {
+    if (!selectedDay) {
+      return null
+    }
+
+    return buildDailySalesReport(
+      ventas || {},
+      new Date(Number.parseInt(selectedYear), Number.parseInt(selectedMonth), selectedDay.dia),
+      productos || {},
+    )
+  }, [ventas, selectedMonth, selectedYear, selectedDay, productos])
 
   const { ventasArray, ventasFiltradas, metricas, diasDelMes, maxVentaDia } = monthlyReport
 
@@ -51,7 +69,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
   // Paginación para ventas
   const totalPages = Math.ceil(ventasFiltradas.length / itemsPerPage)
   const currentItems = ventasFiltradas
-    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+    .sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
     .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
   // Cuando cambian los filtros, volver a la primera página
@@ -151,7 +169,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
       </Card>
 
       {/* Métricas principales */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Ventas Totales</CardTitle>
@@ -187,6 +205,17 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
           <CardContent>
             <div className="text-xl sm:text-2xl font-bold">${metricas.promedioVenta.toFixed(2)}</div>
             <p className="text-xs text-purple-100">Ticket promedio</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Ganancia Estimada</CardTitle>
+            <TrendingUp className="h-4 w-4" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl sm:text-2xl font-bold">${metricas.gananciaEstimada.toFixed(2)}</div>
+            <p className="text-xs text-orange-100">Calculada con costo de productos</p>
           </CardContent>
         </Card>
       </div>
@@ -269,8 +298,8 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
               {metricas.topProductos.length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No hay ventas en este período</p>
               ) : (
-                metricas.topProductos.map(([id, producto], index) => (
-                  <div key={id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                metricas.topProductos.map((producto, index) => (
+                  <div key={producto.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
                     <div className="flex items-center space-x-3">
                       <Badge variant="outline" className="w-8 h-8 rounded-full flex items-center justify-center">
                         {index + 1}
@@ -391,7 +420,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                                 <Badge variant="outline" className="capitalize text-xs">
                                   {pago.metodo}
                                 </Badge>
-                                <span className="text-xs">${Number.parseFloat(pago.monto).toFixed(2)}</span>
+                                <span className="text-xs">${Number(pago.monto).toFixed(2)}</span>
                               </div>
                             ))
                           ) : (
@@ -491,12 +520,12 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
           </DialogHeader>
           <div className="space-y-4">
             {/* Resumen del día */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <Card className="bg-blue-50 dark:bg-blue-950">
                 <CardContent className="p-4">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                      {ventasDelDiaSeleccionado.length}
+                      {selectedDayReport?.metricas.cantidadVentas ?? ventasDelDiaSeleccionado.length}
                     </div>
                     <div className="text-sm text-blue-700 dark:text-blue-300">Ventas realizadas</div>
                   </div>
@@ -506,7 +535,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                 <CardContent className="p-4">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-green-600">
-                      ${ventasDelDiaSeleccionado.reduce((sum, venta) => sum + venta.total, 0).toFixed(2)}
+                      ${selectedDayReport?.metricas.totalVentas.toFixed(2) ?? ventasDelDiaSeleccionado.reduce((sum, venta) => sum + venta.total, 0).toFixed(2)}
                     </div>
                     <div className="text-sm text-green-700">Total vendido</div>
                   </div>
@@ -516,13 +545,19 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                 <CardContent className="p-4">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-purple-600">
-                      $
-                      {(
-                        ventasDelDiaSeleccionado.reduce((sum, venta) => sum + venta.total, 0) /
-                        ventasDelDiaSeleccionado.length
-                      ).toFixed(2)}
+                      ${selectedDayReport?.metricas.gananciaEstimada.toFixed(2) ?? "0.00"}
                     </div>
-                    <div className="text-sm text-purple-700">Promedio por venta</div>
+                    <div className="text-sm text-purple-700">Ganancia estimada</div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-orange-50">
+                <CardContent className="p-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-orange-600">
+                      {selectedDayReport?.metricas.productosVendidos ?? 0}
+                    </div>
+                    <div className="text-sm text-orange-700">Productos vendidos</div>
                   </div>
                 </CardContent>
               </Card>
@@ -554,7 +589,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                       <div>
                         <h5 className="font-medium mb-2">Productos:</h5>
                         <div className="space-y-1">
-                          {venta.items?.map((item, itemIndex) => (
+                          {venta.items?.map((item: any, itemIndex: number) => (
                             <div key={itemIndex} className="text-sm bg-muted p-2 rounded">
                               <div className="font-medium">{item.nombre}</div>
                               <div className="text-muted-foreground">
@@ -571,7 +606,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                         <h5 className="font-medium mb-2">Métodos de Pago:</h5>
                         <div className="space-y-1">
                           {venta.pagos ? (
-                            venta.pagos.map((pago, pagoIndex) => (
+                            venta.pagos.map((pago: any, pagoIndex: number) => (
                               <div
                                 key={pagoIndex}
                                 className="flex items-center justify-between text-sm bg-muted p-2 rounded"
@@ -579,7 +614,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                                 <Badge variant="outline" className="capitalize">
                                   {pago.metodo}
                                 </Badge>
-                                <span className="font-medium">${Number.parseFloat(pago.monto).toFixed(2)}</span>
+                                <span className="font-medium">${Number(pago.monto).toFixed(2)}</span>
                               </div>
                             ))
                           ) : (
