@@ -28,6 +28,18 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
   const [filterProveedor, setFilterProveedor] = useState("")
   const [filterTipo, setFilterTipo] = useState("")
 
+  const getErrorMessage = (error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message) {
+      return error.message
+    }
+
+    if (typeof error === "string" && error.trim()) {
+      return error
+    }
+
+    return fallback
+  }
+
   // Paginación para la tabla de ventas
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
@@ -144,6 +156,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
       alert("Venta procesada exitosamente")
     } catch (error) {
       console.error("Error al procesar venta:", error)
+      alert(getErrorMessage(error, "Error al procesar la venta"))
     }
   }
 
@@ -167,7 +180,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
       alert("Venta eliminada exitosamente y stock restaurado")
     } catch (error) {
       console.error("Error al eliminar venta:", error)
-      alert("Error al eliminar la venta")
+      alert(getErrorMessage(error, "Error al eliminar la venta"))
     }
   }
 
