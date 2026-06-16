@@ -16,6 +16,7 @@ import {
   type QueryDocumentSnapshot,
 } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
+import { ANALYTICS_EVENTS, trackEvent } from "@/src/services/analytics.service"
 import { normalizeCatalogProduct, sanitizeFirestoreData } from "@/lib/product-sync"
 import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 import { type ProductCollection, type ProductRecord } from "@/src/services/products.service"
@@ -616,6 +617,13 @@ const saveSaleWithStockUpdate = async (
     }
   })
 
+  void trackEvent(ANALYTICS_EVENTS.saleCreated, {
+    businessId,
+    saleId,
+    itemsCount: normalizedSale.items.length,
+    total: normalizedSale.total,
+  })
+
   invalidateBusinessCache(businessId)
 
   return saleId
@@ -674,6 +682,12 @@ export const createSale = async (businessId: string, saleData: SaleRecord): Prom
 
   const normalizedSale = normalizeSaleRecord(saleData, saleId, businessId)
   await writeSaleOnly(businessId, saleId, normalizedSale)
+  void trackEvent(ANALYTICS_EVENTS.saleCreated, {
+    businessId,
+    saleId,
+    itemsCount: normalizedSale.items.length,
+    total: normalizedSale.total,
+  })
   invalidateBusinessCache(businessId)
   return saleId
 }
@@ -764,6 +778,10 @@ export const deleteSale = async (businessId: string, saleId: string): Promise<vo
   try {
     await deleteSaleMirrorInFirestore(businessId, saleId)
     await syncSaleDeletionToRealtime(businessId, saleId)
+    void trackEvent(ANALYTICS_EVENTS.saleDeleted, {
+      businessId,
+      saleId,
+    })
   } finally {
     invalidateBusinessCache(businessId)
   }
@@ -820,6 +838,11 @@ export const deleteSaleAndRestoreStock = async (
         console.error("Error al sincronizar el espejo Realtime Database:", result.reason)
       }
     })
+  })
+
+  void trackEvent(ANALYTICS_EVENTS.saleDeleted, {
+    businessId,
+    saleId,
   })
 
   invalidateBusinessCache(businessId)

@@ -1,6 +1,7 @@
 import { get, ref, remove, set } from "firebase/database"
 import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
+import { ANALYTICS_EVENTS, trackEvent } from "@/src/services/analytics.service"
 import { sanitizeFirestoreData } from "@/lib/product-sync"
 import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 import { bulkUpdateProducts, type ProductCollection, type ProductRecord } from "@/src/services/products.service"
@@ -279,6 +280,10 @@ export const saveProvider = async (
         ? remove(getLegacyProviderRef(businessId, providerId))
         : set(getLegacyProviderRef(businessId, providerId), firestoreProviderData),
     ])
+    void trackEvent(existingProvider ? ANALYTICS_EVENTS.providerUpdated : ANALYTICS_EVENTS.providerCreated, {
+      businessId,
+      providerId,
+    })
   } finally {
     invalidateBusinessCache(businessId)
   }
@@ -318,6 +323,10 @@ export const deleteProvider = async (businessId: string, providerId: string): Pr
       setDoc(getProviderDocRef(businessId, providerId), sanitizeFirestoreData(deactivatedProvider)),
       remove(getLegacyProviderRef(businessId, providerId)),
     ])
+    void trackEvent(ANALYTICS_EVENTS.providerDeleted, {
+      businessId,
+      providerId,
+    })
   } finally {
     invalidateBusinessCache(businessId)
   }
@@ -353,6 +362,10 @@ export const setProviderActive = async (
         ? set(getLegacyProviderRef(businessId, providerId), sanitizeFirestoreData(updatedProvider))
         : remove(getLegacyProviderRef(businessId, providerId)),
     ])
+    void trackEvent(ANALYTICS_EVENTS.providerUpdated, {
+      businessId,
+      providerId,
+    })
   } finally {
     invalidateBusinessCache(businessId)
   }

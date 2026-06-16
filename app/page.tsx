@@ -13,6 +13,7 @@ import Dashboard from "@/components/dashboard"
 import SuperAdminPanel from "@/components/super-admin-panel"
 import { LogIn, AlertCircle } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
+import { ANALYTICS_EVENTS, trackEvent } from "@/src/services/analytics.service"
 
 type LegacyUserRecord = {
   email?: string
@@ -60,6 +61,7 @@ export default function Home() {
           name: "Super Administrador"
         }
         login(adminUser, true)
+        void trackEvent(ANALYTICS_EVENTS.loginSuccess, { role: "super_admin" })
         setEmail("")
         setPassword("")
         return
@@ -100,6 +102,7 @@ export default function Home() {
           empresa: userData.empresa || "Cliente"
         }
         login(normalUser, false)
+        void trackEvent(ANALYTICS_EVENTS.loginSuccess, { role: "user" })
         setEmail("")
         setPassword("")
       } else {

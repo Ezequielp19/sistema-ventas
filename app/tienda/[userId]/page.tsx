@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { use } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,7 @@ import { useClient } from "@/hooks/use-client"
 import { ClientOnly } from "@/components/client-only"
 import { loadPublicStore } from "@/src/services/store.service"
 import { normalizeCatalogProduct } from "@/lib/product-sync"
+import { ANALYTICS_EVENTS, trackEvent } from "@/src/services/analytics.service"
 
 type Producto = ReturnType<typeof normalizeCatalogProduct>
 
@@ -56,12 +57,41 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
 
   const isClient = useClient()
   const [catalogUrl, setCatalogUrl] = useState("")
+  const storeOpenedTrackedRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (isClient) {
       setCatalogUrl(window.location.href)
     }
   }, [isClient])
+
+  useEffect(() => {
+    if (!isClient || !userId) {
+      return
+    }
+
+    const storageKey = `analytics:store_opened:${userId}`
+    if (storeOpenedTrackedRef.current === storageKey) {
+      return
+    }
+
+    storeOpenedTrackedRef.current = storageKey
+
+    try {
+      if (window.sessionStorage.getItem(storageKey)) {
+        return
+      }
+
+      window.sessionStorage.setItem(storageKey, "1")
+    } catch {
+      // Si sessionStorage no está disponible, igual intentamos enviar el evento una vez por montaje.
+    }
+
+    void trackEvent(ANALYTICS_EVENTS.storeOpened, {
+      businessId: userId,
+      source: "public_store",
+    })
+  }, [isClient, userId])
 
   useEffect(() => {
     const cargarTienda = async () => {

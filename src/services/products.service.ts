@@ -15,6 +15,7 @@ import {
   type QueryDocumentSnapshot,
 } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
+import { ANALYTICS_EVENTS, trackEvent } from "@/src/services/analytics.service"
 import { mergePublicCatalogCollections, normalizeCatalogProduct, sanitizeFirestoreData } from "@/lib/product-sync"
 import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 
@@ -569,6 +570,10 @@ export const saveProduct = async (
       setDoc(getFirestoreProductDocRef(businessId, productId), firestoreProductData),
       writeProductMirrors(businessId, productId, firestoreProductData),
     ])
+    void trackEvent(existingProduct ? ANALYTICS_EVENTS.productUpdated : ANALYTICS_EVENTS.productCreated, {
+      businessId,
+      productId,
+    })
   } finally {
     invalidateBusinessCache(businessId)
   }
@@ -594,6 +599,10 @@ export const deleteProduct = async (businessId: string, productId: string): Prom
       deleteDoc(getFirestoreProductDocRef(businessId, productId)),
       deleteProductMirrors(businessId, productId),
     ])
+    void trackEvent(ANALYTICS_EVENTS.productDeleted, {
+      businessId,
+      productId,
+    })
   } finally {
     invalidateBusinessCache(businessId)
   }

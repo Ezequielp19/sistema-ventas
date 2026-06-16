@@ -1,5 +1,6 @@
 import { saveProvider } from "@/src/services/providers.service"
 import { saveProduct } from "@/src/services/products.service"
+import { ANALYTICS_EVENTS, trackEvent, withAnalyticsSuppressed } from "@/src/services/analytics.service"
 import { saveSaleWithStockUpdateById, type SaleRecord } from "@/src/services/sales.service"
 import { saveStoreConfig, type StoreConfig } from "@/src/services/store.service"
 
@@ -384,25 +385,37 @@ export const seedDemoDataForBusiness = async (businessId: string): Promise<DemoS
     throw new Error("Falta el negocio para cargar datos demo")
   }
 
-  const storeConfig = buildDemoStoreConfig(businessId)
-  const providerRecords = DEMO_PROVIDERS.map((provider) => buildDemoProviderRecord(businessId, provider))
-  const productRecords = DEMO_PRODUCTS.map((product) => buildDemoProductRecord(businessId, product))
+  const result = await withAnalyticsSuppressed(async () => {
+    const storeConfig = buildDemoStoreConfig(businessId)
+    const providerRecords = DEMO_PROVIDERS.map((provider) => buildDemoProviderRecord(businessId, provider))
+    const productRecords = DEMO_PRODUCTS.map((product) => buildDemoProductRecord(businessId, product))
 
-  await saveStoreConfig(businessId, storeConfig)
-  await Promise.all(providerRecords.map((providerRecord) => saveProvider(businessId, providerRecord.id, providerRecord)))
-  await Promise.all(productRecords.map((productRecord) => saveProduct(businessId, productRecord.id, productRecord)))
+    await saveStoreConfig(businessId, storeConfig)
+    await Promise.all(providerRecords.map((providerRecord) => saveProvider(businessId, providerRecord.id, providerRecord)))
+    await Promise.all(productRecords.map((productRecord) => saveProduct(businessId, productRecord.id, productRecord)))
 
-  for (const saleTemplate of DEMO_SALES) {
-    const saleRecord = buildDemoSaleRecord(businessId, saleTemplate)
-    await saveSaleWithStockUpdateById(businessId, saleTemplate.id, saleRecord, {})
-  }
+    for (const saleTemplate of DEMO_SALES) {
+      const saleRecord = buildDemoSaleRecord(businessId, saleTemplate)
+      await saveSaleWithStockUpdateById(businessId, saleTemplate.id, saleRecord, {})
+    }
 
-  return {
+    return {
+      businessId,
+      storeName: storeConfig.nombre,
+      productsCreated: productRecords.length,
+      providersCreated: providerRecords.length,
+      salesCreated: DEMO_SALES.length,
+      demoDataVersion: DEMO_DATA_VERSION,
+    }
+  })
+
+  void trackEvent(ANALYTICS_EVENTS.demoDataLoaded, {
     businessId,
-    storeName: storeConfig.nombre,
-    productsCreated: productRecords.length,
-    providersCreated: providerRecords.length,
-    salesCreated: DEMO_SALES.length,
-    demoDataVersion: DEMO_DATA_VERSION,
-  }
+    productsCreated: result.productsCreated,
+    providersCreated: result.providersCreated,
+    salesCreated: result.salesCreated,
+    demoDataVersion: result.demoDataVersion,
+  })
+
+  return result
 }
