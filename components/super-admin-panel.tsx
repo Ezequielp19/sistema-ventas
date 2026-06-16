@@ -210,7 +210,6 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         emailjs.init(EMAILJS_CONFIG.publicKey)
         emailjsInitialized = true
       }
-      console.log("EmailJS inicializado correctamente")
     } catch (error) {
       console.error("Error al inicializar EmailJS:", error)
     }
@@ -275,31 +274,20 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         app_name: "Sistema de Ventas"
       }
 
-      console.log("Enviando email con parámetros:", {
-        serviceId: EMAILJS_CONFIG.serviceId,
-        templateId: EMAILJS_CONFIG.templateId,
-        to: userEmail,
-        params: { ...templateParams, user_password: '***' } // No mostrar contraseña en logs
-      })
-
-      const response = await emailjs.send(
+      await emailjs.send(
         EMAILJS_CONFIG.serviceId,
         EMAILJS_CONFIG.templateId,
         templateParams,
         EMAILJS_CONFIG.publicKey
       )
 
-      console.log("Email enviado exitosamente:", response)
       return true
     } catch (error) {
       const emailError = getErrorDetails(error)
-      console.error("Error detallado al enviar email:", {
-        error,
-        status: emailError.status,
-        text: emailError.text,
+      console.error("Error al enviar email con EmailJS:", {
+        code: emailError.code || "",
         message: emailError.message,
-        serviceId: EMAILJS_CONFIG.serviceId,
-        templateId: EMAILJS_CONFIG.templateId
+        status: emailError.status,
       })
       return false
     } finally {

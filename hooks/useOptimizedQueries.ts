@@ -254,7 +254,6 @@ export const useCacheManagement = () => {
       // Importar dinámicamente para evitar problemas de SSR
       const { clearCache } = await import('@/lib/optimized-queries')
       clearCache()
-      console.log('Cache limpiado exitosamente')
     } catch (error) {
       console.error('Error al limpiar cache:', error)
     }
@@ -265,7 +264,6 @@ export const useCacheManagement = () => {
       // Importar dinámicamente para evitar problemas de SSR
       const { clearCache } = await import('@/lib/optimized-queries')
       clearCache(path)
-      console.log(`Cache de ${path} limpiado exitosamente`)
     } catch (error) {
       console.error('Error al limpiar cache de path:', error)
     }
