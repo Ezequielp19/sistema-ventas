@@ -501,6 +501,7 @@ const updateProductStocksInTransaction = async (
   direction: 1 | -1,
 ) => {
   const updatedProducts = new Map<string, ProductRecord>()
+  const productSources = new Map<string, ProductRecord>()
 
   for (const [productId, quantity] of Object.entries(stockChanges)) {
     if (!productId || quantity <= 0) {
@@ -516,6 +517,19 @@ const updateProductStocksInTransaction = async (
         ? normalizeCatalogProduct(fallbackProduct, productId)
         : null
 
+    if (!sourceProduct) {
+      throw Object.assign(new Error(`El producto ${productId} no existe.`), { code: "product-not-found" })
+    }
+
+    productSources.set(productId, sourceProduct)
+  }
+
+  for (const [productId, quantity] of Object.entries(stockChanges)) {
+    if (!productId || quantity <= 0) {
+      continue
+    }
+
+    const sourceProduct = productSources.get(productId)
     if (!sourceProduct) {
       throw Object.assign(new Error(`El producto ${productId} no existe.`), { code: "product-not-found" })
     }
@@ -541,6 +555,7 @@ const updateProductStocksInTransaction = async (
       productId,
     )
 
+    const productRef = getFirestoreProductDocRef(businessId, productId)
     transaction.set(productRef, sanitizeFirestoreData(updatedProduct), { merge: true })
     updatedProducts.set(productId, sanitizeFirestoreData(updatedProduct))
   }
@@ -554,12 +569,15 @@ const saveSaleWithStockUpdate = async (
   products: ProductCollection,
   stockDirection: 1 | -1,
   existingSaleData: SaleRecord = {},
+  customSaleId?: string,
 ): Promise<string> => {
   if (!businessId) {
     return ""
   }
 
-  const saleRef = doc(collection(firestore, getFirestoreSalesPath(businessId)))
+  const saleRef = customSaleId
+    ? doc(firestore, getFirestoreSalesPath(businessId), customSaleId)
+    : doc(collection(firestore, getFirestoreSalesPath(businessId)))
   const saleId = saleRef.id
   const normalizedSale = buildSaleRecordForWrite(businessId, saleId, {
     ...existingSaleData,
@@ -666,6 +684,16 @@ export const processSale = async (
   products: ProductCollection,
 ): Promise<string> => {
   return saveSaleWithStockUpdate(businessId, saleData, products, -1)
+}
+
+export const saveSaleWithStockUpdateById = async (
+  businessId: string,
+  saleId: string,
+  saleData: SaleRecord,
+  products: ProductCollection,
+  existingSaleData: SaleRecord = {},
+): Promise<string> => {
+  return saveSaleWithStockUpdate(businessId, saleData, products, -1, existingSaleData, saleId)
 }
 
 export const restoreSaleStock = async (
@@ -813,4 +841,13 @@ export const deleteInvoice = async (userId: string, invoiceId: string): Promise<
   }
 
   await remove(ref(database, `${getInvoicesPath(userId)}/${invoiceId}`))
+}
+
+export const loadInvoices = async (userId: string): Promise<InvoiceCollection> => {
+  if (!userId) {
+    return {}
+  }
+
+  const snapshot = await get(getInvoicesRef(userId))
+  return snapshot.exists() ? (snapshot.val() as InvoiceCollection) : {}
 }

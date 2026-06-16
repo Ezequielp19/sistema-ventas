@@ -33,9 +33,11 @@ import {
   CheckCircle,
   AlertCircle,
   UserX,
-  UserCheck
+  UserCheck,
+  Database,
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { seedDemoDataForBusiness } from "@/src/services/demo-data.service"
 
 // Configuración de EmailJS
 const EMAILJS_CONFIG = {
@@ -104,6 +106,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [sendingEmail, setSendingEmail] = useState(false)
+  const [demoLoadingUserId, setDemoLoadingUserId] = useState<string | null>(null)
 
   const [userFormData, setUserFormData] = useState<UserFormData>({
     nombre: "",
@@ -531,6 +534,49 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     }
   }
 
+  const handleLoadDemoData = async (id: string, userData: InternalUserRecord) => {
+    const businessId = userData.businessId || userData.uid || id
+    const businessLabel = userData.nombre || userData.empresa || userData.email || businessId
+
+    if (!businessId) {
+      setError("No se pudo identificar el negocio para cargar datos demo")
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Esto cargará o actualizará los datos demo de ${businessLabel}. Solo toca los registros demo de ese negocio. ¿Continuar?`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      setDemoLoadingUserId(id)
+      setError("")
+      setSuccess("")
+      await ensureSuperAdminFirebaseAuth()
+
+      const result = await seedDemoDataForBusiness(businessId)
+      setSuccess(
+        `Datos demo cargados en ${result.storeName}: ${result.productsCreated} productos, ${result.providersCreated} proveedores y ${result.salesCreated} ventas.`,
+      )
+      await loadData()
+    } catch (error) {
+      console.error("Error al cargar datos demo:", error)
+      const errorDetails = getErrorDetails(error)
+      if (errorDetails.code === "PERMISSION_DENIED") {
+        setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
+      } else {
+        setError(
+          `Error al cargar los datos demo: ${errorDetails.code ? `${errorDetails.code}: ` : ""}${errorDetails.message || "Error desconocido"}`,
+        )
+      }
+    } finally {
+      setDemoLoadingUserId(null)
+    }
+  }
+
   const copyPassword = async (password: string) => {
     try {
       await navigator.clipboard.writeText(password)
@@ -821,6 +867,19 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                                 <UserX className="h-4 w-4 text-red-500" />
                               ) : (
                                 <UserCheck className="h-4 w-4 text-green-500" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleLoadDemoData(userData.id, userData)}
+                              title="Cargar datos demo"
+                              disabled={demoLoadingUserId === userData.id}
+                            >
+                              {demoLoadingUserId === userData.id ? (
+                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                              ) : (
+                                <Database className="h-4 w-4" />
                               )}
                             </Button>
                             <Button

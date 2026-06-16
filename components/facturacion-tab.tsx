@@ -64,6 +64,20 @@ interface Factura {
   observaciones?: string
 }
 
+type VentaSinFacturar = {
+  id: string
+  cliente: string
+  fecha: string
+  total: number
+  metodoPago?: string
+  items?: Array<{
+    nombre?: string
+    cantidad?: number
+    precio?: number
+  }>
+  [key: string]: any
+}
+
 interface FacturacionTabProps {
   ventas: any
   productos: any
@@ -74,7 +88,7 @@ export default function FacturacionTab({ ventas, productos, proveedores }: Factu
   const { user } = useAuth()
   const [facturas, setFacturas] = useState<Factura[]>([])
   const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [selectedVenta, setSelectedVenta] = useState<any>(null)
+  const [selectedVenta, setSelectedVenta] = useState<VentaSinFacturar | null>(null)
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [filterEstado, setFilterEstado] = useState("")
@@ -107,10 +121,10 @@ export default function FacturacionTab({ ventas, productos, proveedores }: Factu
       if (!user?.id) return
       try {
         const facturasData = await loadInvoices(user.id)
-        const facturasArray = Object.entries(facturasData as Record<string, any>).map(([id, factura]: [string, any]) => ({
+        const facturasArray = Object.entries(facturasData as Record<string, Record<string, any>>).map(([id, factura]) => ({
           id,
-          ...(factura as Record<string, any>)
-        }))
+          ...(factura ?? {}),
+        })) as Factura[]
         setFacturas(facturasArray)
       } catch (error) {
         console.error("Error al cargar facturas:", error)
@@ -191,9 +205,9 @@ export default function FacturacionTab({ ventas, productos, proveedores }: Factu
   const currentItems = facturasFiltradas.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
   // Ventas sin facturar
-  const ventasSinFacturar = Object.entries(ventas || {}).filter(([id, venta]: [string, any]) => {
-    return !facturas.some(f => f.ventaId === id)
-  }).map(([id, venta]) => ({ id, ...venta }))
+    const ventasSinFacturar = Object.entries((ventas || {}) as Record<string, Record<string, any>>).filter(([id]) => {
+      return !facturas.some(f => f.ventaId === id)
+    }).map(([id, venta]) => ({ id, ...(venta ?? {}) })) as VentaSinFacturar[]
 
   // Función para generar PDF de factura
   const descargarFacturaPDF = (factura: Factura) => {
