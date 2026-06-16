@@ -9,6 +9,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useAuth } from "@/contexts/auth-context"
 import { Database, CheckCircle, AlertTriangle } from "lucide-react"
 
+type LegacyRecord = Record<string, unknown>
+
+const isRecord = (value: unknown): value is LegacyRecord => {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+const toRecord = (value: unknown): LegacyRecord => {
+  return isRecord(value) ? value : {}
+}
+
 export default function DataMigration() {
   const { user } = useAuth()
   const [isMigrating, setIsMigrating] = useState(false)
@@ -29,11 +39,12 @@ export default function DataMigration() {
       setMigrationStatus("Migrando productos...")
       const productosRef = ref(database, "productos")
       const productosSnapshot = await get(productosRef)
-      const productos = productosSnapshot.val() || {}
+      const productos = (productosSnapshot.val() || {}) as Record<string, unknown>
 
       for (const [id, producto] of Object.entries(productos)) {
+        const productoRecord = toRecord(producto)
         await set(ref(database, `usuarios/${user.id}/productos/${id}`), {
-          ...producto,
+          ...productoRecord,
           usuarioId: user.id
         })
       }
@@ -42,11 +53,12 @@ export default function DataMigration() {
       setMigrationStatus("Migrando proveedores...")
       const proveedoresRef = ref(database, "proveedores")
       const proveedoresSnapshot = await get(proveedoresRef)
-      const proveedores = proveedoresSnapshot.val() || {}
+      const proveedores = (proveedoresSnapshot.val() || {}) as Record<string, unknown>
 
       for (const [id, proveedor] of Object.entries(proveedores)) {
+        const proveedorRecord = toRecord(proveedor)
         await set(ref(database, `usuarios/${user.id}/proveedores/${id}`), {
-          ...proveedor,
+          ...proveedorRecord,
           usuarioId: user.id
         })
       }
@@ -55,20 +67,21 @@ export default function DataMigration() {
       setMigrationStatus("Migrando ventas...")
       const ventasRef = ref(database, "ventas")
       const ventasSnapshot = await get(ventasRef)
-      const ventas = ventasSnapshot.val() || {}
+      const ventas = (ventasSnapshot.val() || {}) as Record<string, unknown>
 
       for (const [id, venta] of Object.entries(ventas)) {
+        const ventaRecord = toRecord(venta)
         await set(ref(database, `usuarios/${user.id}/ventas/${id}`), {
-          ...venta,
+          ...ventaRecord,
           usuarioId: user.id
         })
       }
 
       setMigrationStatus("Migración completada exitosamente")
       setMigrationComplete(true)
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error durante la migración:", error)
-      setMigrationStatus(`Error durante la migración: ${error.message}`)
+      setMigrationStatus(`Error durante la migración: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setIsMigrating(false)
     }
@@ -81,7 +94,7 @@ export default function DataMigration() {
       const userProductosRef = ref(database, `usuarios/${user.id}/productos`)
       const userProductosSnapshot = await get(userProductosRef)
       return userProductosSnapshot.exists()
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error verificando datos existentes:", error)
       return false
     }

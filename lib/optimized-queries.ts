@@ -1,16 +1,20 @@
-import { ref, onValue, off, get, query, orderByChild, limitToLast, startAt, endAt } from "firebase/database"
+import {
+  get,
+  limitToLast,
+  onValue,
+  orderByChild,
+  query,
+  ref,
+  startAt,
+  endAt,
+  type DatabaseReference,
+  type Query,
+  type Unsubscribe,
+} from "firebase/database"
 import { database } from "./firebase"
 
-// Cache para almacenar datos y evitar consultas repetidas
-const cache = new Map()
-const listeners = new Map()
-
-// Configuración de cache
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutos
-const MAX_CACHE_SIZE = 100
-
-interface CacheEntry {
-  data: any
+type CacheEntry = {
+  data: unknown
   timestamp: number
   listeners: number
 }
@@ -18,13 +22,35 @@ interface CacheEntry {
 interface QueryOptions {
   limit?: number
   orderBy?: string
-  startAt?: any
-  endAt?: any
+  startAt?: string | number | boolean | null
+  endAt?: string | number | boolean | null
   cache?: boolean
   realtime?: boolean
 }
 
-// Limpiar cache expirado
+type ListenerCallback = (data: Record<string, unknown>) => void
+
+type ListenerEntry = {
+  ref: DatabaseReference | Query
+  callbacks: Set<ListenerCallback>
+  count: number
+  unsubscribe: Unsubscribe
+}
+
+const cache = new Map<string, CacheEntry>()
+const listeners = new Map<string, ListenerEntry>()
+
+const CACHE_DURATION = 5 * 60 * 1000
+const MAX_CACHE_SIZE = 100
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+const toRecord = (value: unknown): Record<string, unknown> => {
+  return isRecord(value) ? value : {}
+}
+
 const cleanExpiredCache = () => {
   const now = Date.now()
   for (const [key, entry] of cache.entries()) {
@@ -34,60 +60,63 @@ const cleanExpiredCache = () => {
   }
 }
 
-// Limitar tamaño del cache
 const limitCacheSize = () => {
-  if (cache.size > MAX_CACHE_SIZE) {
-    const entries = Array.from(cache.entries())
-    entries.sort((a, b) => a[1].timestamp - b[1].timestamp)
-    const toDelete = entries.slice(0, Math.floor(MAX_CACHE_SIZE / 2))
-    toDelete.forEach(([key]) => cache.delete(key))
+  if (cache.size <= MAX_CACHE_SIZE) {
+    return
   }
+
+  const entries = Array.from(cache.entries())
+  entries.sort((a, b) => a[1].timestamp - b[1].timestamp)
+  const toDelete = entries.slice(0, Math.floor(MAX_CACHE_SIZE / 2))
+
+  toDelete.forEach(([key]) => {
+    cache.delete(key)
+  })
+}
+
+const buildQueryReference = (path: string, options: QueryOptions = {}): DatabaseReference | Query => {
+  let dbRef: DatabaseReference | Query = ref(database, path)
+
+  if (options.orderBy) {
+    dbRef = query(dbRef, orderByChild(options.orderBy))
+  }
+
+  if (options.limit) {
+    dbRef = query(dbRef, limitToLast(options.limit))
+  }
+
+  if (options.startAt !== undefined) {
+    dbRef = query(dbRef, startAt(options.startAt))
+  }
+
+  if (options.endAt !== undefined) {
+    dbRef = query(dbRef, endAt(options.endAt))
+  }
+
+  return dbRef
 }
 
 // Función optimizada para obtener datos
-export const getOptimizedData = async (
-  path: string,
-  options: QueryOptions = {}
-): Promise<any> => {
+export const getOptimizedData = async (path: string, options: QueryOptions = {}): Promise<Record<string, unknown>> => {
   const cacheKey = `${path}_${JSON.stringify(options)}`
-  
-  // Verificar cache si está habilitado
+
   if (options.cache !== false) {
     const cached = cache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      return cached.data
+      return toRecord(cached.data)
     }
   }
 
   try {
-    let dbRef = ref(database, path)
-    
-    // Aplicar filtros si están especificados
-    if (options.orderBy) {
-      dbRef = query(dbRef, orderByChild(options.orderBy))
-    }
-    
-    if (options.limit) {
-      dbRef = query(dbRef, limitToLast(options.limit))
-    }
-    
-    if (options.startAt !== undefined) {
-      dbRef = query(dbRef, startAt(options.startAt))
-    }
-    
-    if (options.endAt !== undefined) {
-      dbRef = query(dbRef, endAt(options.endAt))
-    }
-
+    const dbRef = buildQueryReference(path, options)
     const snapshot = await get(dbRef)
-    const data = snapshot.val() || {}
+    const data = toRecord(snapshot.val())
 
-    // Guardar en cache
     if (options.cache !== false) {
       cache.set(cacheKey, {
         data,
         timestamp: Date.now(),
-        listeners: 0
+        listeners: 0,
       })
       limitCacheSize()
     }
@@ -102,87 +131,71 @@ export const getOptimizedData = async (
 // Función optimizada para listeners en tiempo real
 export const listenOptimizedData = (
   path: string,
-  callback: (data: any) => void,
-  options: QueryOptions = {}
+  callback: ListenerCallback,
+  options: QueryOptions = {},
 ): (() => void) => {
   const cacheKey = `${path}_${JSON.stringify(options)}`
-  
-  // Si ya hay un listener activo, reutilizarlo
+
   if (listeners.has(cacheKey)) {
     const entry = listeners.get(cacheKey)
-    entry.callbacks.add(callback)
-    entry.count++
-    
-    // Retornar callback inmediatamente si hay datos en cache
-    if (cache.has(cacheKey)) {
-      const cached = cache.get(cacheKey)
-      callback(cached.data)
-    }
-    
-    return () => {
-      entry.callbacks.delete(callback)
-      entry.count--
-      if (entry.count === 0) {
-        off(entry.ref)
-        listeners.delete(cacheKey)
+    if (entry) {
+      entry.callbacks.add(callback)
+      entry.count++
+
+      if (cache.has(cacheKey)) {
+        const cached = cache.get(cacheKey)
+        callback(toRecord(cached?.data))
+      }
+
+      return () => {
+        entry.callbacks.delete(callback)
+        entry.count--
+
+        if (entry.count === 0) {
+          entry.unsubscribe()
+          listeners.delete(cacheKey)
+        }
       }
     }
   }
 
-  let dbRef = ref(database, path)
-  
-  // Aplicar filtros si están especificados
-  if (options.orderBy) {
-    dbRef = query(dbRef, orderByChild(options.orderBy))
-  }
-  
-  if (options.limit) {
-    dbRef = query(dbRef, limitToLast(options.limit))
-  }
-  
-  if (options.startAt !== undefined) {
-    dbRef = query(dbRef, startAt(options.startAt))
-  }
-  
-  if (options.endAt !== undefined) {
-    dbRef = query(dbRef, endAt(options.endAt))
-  }
+  const dbRef = buildQueryReference(path, options)
+  const callbacks = new Set<ListenerCallback>([callback])
 
-  const callbacks = new Set([callback])
-  
   const unsubscribe = onValue(dbRef, (snapshot) => {
-    const data = snapshot.val() || {}
-    
-    // Actualizar cache
+    const data = toRecord(snapshot.val())
+
     if (options.cache !== false) {
       cache.set(cacheKey, {
         data,
         timestamp: Date.now(),
-        listeners: callbacks.size
+        listeners: callbacks.size,
       })
       limitCacheSize()
     }
-    
-    // Notificar a todos los callbacks
-    callbacks.forEach(cb => cb(data))
+
+    callbacks.forEach((currentCallback) => currentCallback(data))
   })
 
   listeners.set(cacheKey, {
     ref: dbRef,
     callbacks,
     count: 1,
-    unsubscribe
+    unsubscribe,
   })
 
   return () => {
     const entry = listeners.get(cacheKey)
-    if (entry) {
-      entry.callbacks.delete(callback)
-      entry.count--
-      if (entry.count === 0) {
-        entry.unsubscribe()
-        listeners.delete(cacheKey)
-      }
+    if (!entry) {
+      return
+    }
+
+    entry.callbacks.delete(callback)
+    entry.count--
+
+    if (entry.count === 0) {
+      entry.unsubscribe()
+      listeners.delete(cacheKey)
     }
   }
 }
@@ -192,37 +205,39 @@ export const getPaginatedData = async (
   path: string,
   page: number,
   pageSize: number,
-  orderBy: string = 'fecha',
-  options: QueryOptions = {}
-): Promise<{ data: any, total: number, hasMore: boolean }> => {
+  orderBy: string = "fecha",
+  options: QueryOptions = {},
+): Promise<{ data: Record<string, unknown>; total: number; hasMore: boolean }> => {
   const offset = (page - 1) * pageSize
-  
-  // Obtener total de registros (solo una vez y cachear)
+
   const totalCacheKey = `${path}_total`
-  let total = cache.get(totalCacheKey)?.data
-  
+  let total = 0
+  const cachedTotal = cache.get(totalCacheKey)
+  if (cachedTotal && typeof cachedTotal.data === "number") {
+    total = cachedTotal.data
+  }
+
   if (!total) {
     const totalSnapshot = await get(ref(database, path))
-    total = Object.keys(totalSnapshot.val() || {}).length
+    total = Object.keys(toRecord(totalSnapshot.val())).length
     cache.set(totalCacheKey, {
       data: total,
       timestamp: Date.now(),
-      listeners: 0
+      listeners: 0,
     })
   }
 
-  // Obtener datos paginados
   const data = await getOptimizedData(path, {
     ...options,
     limit: pageSize,
     orderBy,
-    cache: true
+    cache: true,
   })
 
   return {
     data,
     total,
-    hasMore: offset + pageSize < total
+    hasMore: offset + pageSize < total,
   }
 }
 
@@ -231,37 +246,35 @@ export const searchOptimizedData = async (
   path: string,
   searchTerm: string,
   searchFields: string[],
-  options: QueryOptions = {}
-): Promise<any> => {
+  options: QueryOptions = {},
+): Promise<Record<string, unknown>> => {
   if (!searchTerm.trim()) {
     return await getOptimizedData(path, options)
   }
 
   const cacheKey = `${path}_search_${searchTerm}_${JSON.stringify(options)}`
-  
-  // Verificar cache de búsqueda
+
   const cached = cache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.data
+    return toRecord(cached.data)
   }
 
   const allData = await getOptimizedData(path, { cache: false })
-  
-  const filteredData = Object.entries(allData).filter(([id, item]: [string, any]) => {
-    return searchFields.some(field => {
-      const value = item[field]
-      return value && value.toString().toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredData = Object.entries(allData).filter(([, item]) => {
+    const record = toRecord(item)
+    return searchFields.some((field) => {
+      const value = record[field]
+      return value !== undefined && value !== null && String(value).toLowerCase().includes(searchTerm.toLowerCase())
     })
-  }).reduce((acc, [id, item]) => {
-    acc[id] = item
-    return acc
+  }).reduce<Record<string, unknown>>((accumulator, [id, item]) => {
+    accumulator[id] = item
+    return accumulator
   }, {})
 
-  // Cachear resultado de búsqueda
   cache.set(cacheKey, {
     data: filteredData,
     timestamp: Date.now(),
-    listeners: 0
+    listeners: 0,
   })
 
   return filteredData
@@ -270,16 +283,15 @@ export const searchOptimizedData = async (
 // Función para limpiar cache
 export const clearCache = (path?: string) => {
   if (path) {
-    // Limpiar cache específico
     for (const key of cache.keys()) {
       if (key.startsWith(path)) {
         cache.delete(key)
       }
     }
-  } else {
-    // Limpiar todo el cache
-    cache.clear()
+    return
   }
+
+  cache.clear()
 }
 
 // Función para obtener estadísticas del cache
@@ -288,19 +300,17 @@ export const getCacheStats = () => {
     size: cache.size,
     maxSize: MAX_CACHE_SIZE,
     listeners: listeners.size,
-    memoryUsage: process.memoryUsage?.() || 'N/A'
+    memoryUsage: typeof process !== "undefined" && typeof process.memoryUsage === "function" ? process.memoryUsage() : "N/A",
   }
 }
 
-// Limpiar cache automáticamente cada 5 minutos
 setInterval(cleanExpiredCache, CACHE_DURATION)
 
-// Exportar funciones de utilidad
 export const optimizedQueries = {
   getOptimizedData,
   listenOptimizedData,
   getPaginatedData,
   searchOptimizedData,
   clearCache,
-  getCacheStats
-} 
+  getCacheStats,
+}

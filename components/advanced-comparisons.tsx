@@ -19,6 +19,75 @@ import {
 } from "lucide-react"
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 
+type SaleItemLike = {
+  nombre?: string
+  cantidad?: number
+}
+
+type SaleLike = {
+  id: string
+  fecha: Date
+  total: number
+  items?: SaleItemLike[]
+  [key: string]: unknown
+}
+
+type PeriodData = {
+  periodo: string
+  total: number
+  cantidad: number
+  promedio: number
+  productosVendidos: number
+  startDate: Date
+  endDate: Date
+}
+
+type VariationData = {
+  periodo: string
+  total: number
+  cantidad: number
+  promedio: number
+}
+
+type TopProduct = {
+  nombre: string
+  cantidad: number
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+const toNumber = (value: unknown, fallback = 0): number => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsedValue = Number(value)
+    return Number.isFinite(parsedValue) ? parsedValue : fallback
+  }
+
+  return fallback
+}
+
+const toDate = (value: unknown): Date => {
+  if (value instanceof Date) {
+    return value
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    const parsedDate = new Date(value)
+    return Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate
+  }
+
+  if (isRecord(value) && typeof value.toDate === "function") {
+    return value.toDate()
+  }
+
+  return new Date()
+}
+
 interface AdvancedComparisonsProps {
   ventas: any
   productos: any
@@ -45,20 +114,38 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
   const [selectedPeriods, setSelectedPeriods] = useState<number>(3)
 
   // Procesar datos de ventas
-  const ventasArray = Object.entries(ventas || {}).map(([id, venta]) => ({
-    id,
-    ...venta,
-    fecha: new Date(venta.fecha),
-  }))
+  const ventasArray: SaleLike[] = Object.entries((ventas || {}) as Record<string, unknown>).map(([id, venta]) => {
+    const ventaRecord = isRecord(venta) ? venta : {}
+    const items = Array.isArray(ventaRecord.items)
+      ? (ventaRecord.items as unknown[]).map((item) => {
+          if (!isRecord(item)) {
+            return { nombre: "", cantidad: 0 }
+          }
+
+          return {
+            nombre: typeof item.nombre === "string" ? item.nombre : "",
+            cantidad: toNumber(item.cantidad),
+          }
+        })
+      : []
+
+    return {
+      id,
+      ...(ventaRecord as Record<string, unknown>),
+      fecha: toDate(ventaRecord.fecha ?? ventaRecord.createdAt ?? ventaRecord.fechaCreacion),
+      total: toNumber(ventaRecord.total),
+      items,
+    }
+  })
 
   // Función para obtener datos de múltiples períodos
-  const getPeriodData = (periods: number) => {
+  const getPeriodData = (periods: number): PeriodData[] => {
     const currentDate = new Date()
-    const data = []
+    const data: PeriodData[] = []
 
     for (let i = periods - 1; i >= 0; i--) {
-      let startDate: Date
-      let endDate: Date
+      let startDate = new Date()
+      let endDate = new Date()
       let periodName: string
 
       switch (comparisonType) {
@@ -82,15 +169,18 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
           break
       }
 
-      const ventasPeriodo = ventasArray.filter(venta => 
+      const ventasPeriodo = ventasArray.filter((venta) => 
         venta.fecha >= startDate && venta.fecha <= endDate
       )
 
       const metricas = {
-        total: ventasPeriodo.reduce((sum, v) => sum + v.total, 0),
+        total: ventasPeriodo.reduce((sum, v) => sum + toNumber(v.total), 0),
         cantidad: ventasPeriodo.length,
-        promedio: ventasPeriodo.length > 0 ? ventasPeriodo.reduce((sum, v) => sum + v.total, 0) / ventasPeriodo.length : 0,
-        productosVendidos: ventasPeriodo.reduce((sum, v) => sum + (v.items?.reduce((s, i) => s + i.cantidad, 0) || 0), 0)
+        promedio: ventasPeriodo.length > 0 ? ventasPeriodo.reduce((sum, v) => sum + toNumber(v.total), 0) / ventasPeriodo.length : 0,
+        productosVendidos: ventasPeriodo.reduce(
+          (sum, v) => sum + (v.items?.reduce((itemsSum: number, item: SaleItemLike) => itemsSum + toNumber(item.cantidad), 0) || 0),
+          0,
+        )
       }
 
       data.push({
@@ -104,11 +194,11 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
     return data
   }
 
-  const periodData = useMemo(() => getPeriodData(selectedPeriods), [selectedPeriods, comparisonType, ventasArray])
+  const periodData = useMemo<PeriodData[]>(() => getPeriodData(selectedPeriods), [selectedPeriods, comparisonType, ventasArray])
 
   // Calcular variaciones
-  const calculateVariations = () => {
-    const variations = []
+  const calculateVariations = (): VariationData[] => {
+    const variations: VariationData[] = []
     
     for (let i = 1; i < periodData.length; i++) {
       const current = periodData[i]
@@ -130,7 +220,7 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
   const variations = calculateVariations()
 
   // Datos para gráficos
-  const chartData = periodData.map(item => ({
+  const chartData = periodData.map((item) => ({
     periodo: item.periodo,
     total: item.total,
     cantidad: item.cantidad,
@@ -138,15 +228,17 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
   }))
 
   // Top productos por período
-  const getTopProducts = () => {
-    const productSales = {}
+  const getTopProducts = (): TopProduct[] => {
+    const productSales: Record<string, number> = {}
     
-    ventasArray.forEach(venta => {
-      venta.items?.forEach(item => {
-        if (productSales[item.nombre]) {
-          productSales[item.nombre] += item.cantidad
+    ventasArray.forEach((venta) => {
+      venta.items?.forEach((item) => {
+        const nombre = item.nombre || "Sin nombre"
+        const cantidad = toNumber(item.cantidad)
+        if (productSales[nombre]) {
+          productSales[nombre] += cantidad
         } else {
-          productSales[item.nombre] = item.cantidad
+          productSales[nombre] = cantidad
         }
       })
     })
@@ -306,7 +398,11 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ nombre, porcentaje }) => `${nombre} (${porcentaje}%)`}
+                    label={(entry: { name?: string; percent?: number; payload?: { nombre?: string } }) => {
+                      const nombre = entry.payload?.nombre ?? entry.name ?? ""
+                      const porcentaje = typeof entry.percent === "number" ? Math.round(entry.percent * 100) : 0
+                      return `${nombre} (${porcentaje}%)`
+                    }}
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="cantidad"
