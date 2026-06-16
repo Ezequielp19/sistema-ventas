@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
 import { normalizeCatalogProduct, sanitizeFirestoreData } from "@/lib/product-sync"
+import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 import { type ProductCollection, type ProductRecord } from "@/src/services/products.service"
 
 export type SaleRecord = Record<string, any>
@@ -597,12 +598,19 @@ const saveSaleWithStockUpdate = async (
     }
   })
 
+  invalidateBusinessCache(businessId)
+
   return saleId
 }
 
 export const loadSales = async (businessId: string): Promise<SaleCollection> => {
   if (!businessId) {
     return {}
+  }
+
+  const cachedSales = getBusinessCache<SaleCollection>("sales", businessId)
+  if (cachedSales) {
+    return cachedSales
   }
 
   const [firestoreSales, legacySales] = await Promise.all([
@@ -615,6 +623,7 @@ export const loadSales = async (businessId: string): Promise<SaleCollection> => 
 
   if (Object.keys(normalizedFirestoreSales).length === 0 && Object.keys(normalizedLegacySales).length > 0) {
     await syncFirestoreSales(businessId, normalizedLegacySales)
+    setBusinessCache("sales", businessId, normalizedLegacySales)
     return normalizedLegacySales
   }
 
@@ -629,7 +638,10 @@ export const loadSales = async (businessId: string): Promise<SaleCollection> => 
     await syncFirestoreSales(businessId, missingLegacySales)
   }
 
-  return mergeSaleCollections(normalizedFirestoreSales, normalizedLegacySales)
+  const mergedSales = mergeSaleCollections(normalizedFirestoreSales, normalizedLegacySales)
+  setBusinessCache("sales", businessId, mergedSales)
+
+  return mergedSales
 }
 
 export const createSale = async (businessId: string, saleData: SaleRecord): Promise<string> => {
@@ -644,6 +656,7 @@ export const createSale = async (businessId: string, saleData: SaleRecord): Prom
 
   const normalizedSale = normalizeSaleRecord(saleData, saleId, businessId)
   await writeSaleOnly(businessId, saleId, normalizedSale)
+  invalidateBusinessCache(businessId)
   return saleId
 }
 
@@ -711,6 +724,8 @@ export const restoreSaleStock = async (
       console.error("Error al sincronizar el espejo Realtime Database:", result.reason)
     }
   })
+
+  invalidateBusinessCache(businessId)
 }
 
 export const deleteSale = async (businessId: string, saleId: string): Promise<void> => {
@@ -718,8 +733,12 @@ export const deleteSale = async (businessId: string, saleId: string): Promise<vo
     return
   }
 
-  await deleteSaleMirrorInFirestore(businessId, saleId)
-  await syncSaleDeletionToRealtime(businessId, saleId)
+  try {
+    await deleteSaleMirrorInFirestore(businessId, saleId)
+    await syncSaleDeletionToRealtime(businessId, saleId)
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 }
 
 export const deleteSaleAndRestoreStock = async (
@@ -774,6 +793,8 @@ export const deleteSaleAndRestoreStock = async (
       }
     })
   })
+
+  invalidateBusinessCache(businessId)
 }
 
 export const createInvoice = async (userId: string, invoiceData: InvoiceRecord): Promise<string> => {

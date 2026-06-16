@@ -28,9 +28,10 @@ type ProviderRecord = {
 
 type ProductosTabProps = {
   proveedores?: Record<string, ProviderRecord>
+  onProductsChanged?: () => Promise<void> | void
 }
 
-export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
+export default function ProductosTab({ proveedores = {}, onProductsChanged }: ProductosTabProps) {
   const { user, isLoading, firebaseAuthReady, firebaseUser } = useAuth()
   const { toast } = useToast()
   const [productos, setProductos] = useState<Record<string, Record<string, any>>>({})
@@ -330,6 +331,7 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
       setShowDialog(false)
       resetForm()
       await cargarProductos()
+      await onProductsChanged?.()
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       toast({
@@ -373,6 +375,7 @@ export default function ProductosTab({ proveedores = {} }: ProductosTabProps) {
       try {
         await deleteProduct(user.id, id)
         await cargarProductos() // Recargar productos después de eliminar
+        await onProductsChanged?.()
       } catch (error) {
         console.error("Error al eliminar producto:", error)
       }

@@ -26,6 +26,7 @@ import {
   watchStoreProducts,
 } from "@/src/services/store.service"
 import { uploadStoreProductImage } from "@/src/services/storage.service"
+import { Loader2 } from "lucide-react"
 
 interface Producto {
   id?: string
@@ -60,7 +61,13 @@ interface User {
   empresa?: string
 }
 
-export default function TiendaTab({ productos: productosProp, user }: { productos?: Record<string, Producto>, user: User }) {
+type TiendaTabProps = {
+  productos?: Record<string, Producto>
+  user: User
+  onProductsChanged?: () => Promise<void> | void
+}
+
+export default function TiendaTab({ productos: productosProp, user, onProductsChanged }: TiendaTabProps) {
   const [productos, setProductos] = useState<Record<string, Producto>>({})
   const [searchTerm, setSearchTerm] = useState("")
   const [filterCategoria, setFilterCategoria] = useState("todas")
@@ -71,6 +78,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const [showShareDialog, setShowShareDialog] = useState(false)
   const [selectedProductForShare, setSelectedProductForShare] = useState<Producto | null>(null)
   const [editingProduct, setEditingProduct] = useState<string | null>(null)
+  const [visibilityLoadingId, setVisibilityLoadingId] = useState<string | null>(null)
   const [tiendaConfig, setTiendaConfig] = useState({
     nombre: "Mi Tienda",
     descripcion: "Los mejores productos al mejor precio",
@@ -85,7 +93,6 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const { toast } = useToast()
   const itemsPerPage = 12
   const userId = user?.uid || user?.id
-  const productosFuente = productosProp && Object.keys(productosProp).length > 0 ? productosProp : productos
 
   const getProductPrice = (producto: Producto) => {
     const rawPrice = producto.precioVenta ?? producto.precio ?? 0
@@ -103,6 +110,12 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
 
     return () => unsubscribe()
   }, [user?.uid, user?.id])
+
+  useEffect(() => {
+    if (productosProp && Object.keys(productosProp).length > 0) {
+      setProductos(productosProp as Record<string, Producto>)
+    }
+  }, [productosProp])
 
   const [formData, setFormData] = useState({
     nombre: "",
@@ -204,8 +217,8 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
       precioVenta: Number.parseFloat(formData.precio),
       stock: Number.parseInt(formData.stock),
       imagen: imagenURL,
-      visibleEnTienda: editingProduct ? productosFuente?.[editingProduct]?.visibleEnTienda ?? true : true,
-      fechaCreacion: editingProduct ? productosFuente?.[editingProduct]?.fechaCreacion || new Date().toISOString() : new Date().toISOString(),
+      visibleEnTienda: editingProduct ? productos?.[editingProduct]?.visibleEnTienda ?? true : true,
+      fechaCreacion: editingProduct ? productos?.[editingProduct]?.fechaCreacion || new Date().toISOString() : new Date().toISOString(),
       fechaActualizacion: new Date().toISOString(),
       usuarioId: userId,
       tiendaId: userId
@@ -226,6 +239,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
         })
       }
 
+      await onProductsChanged?.()
       resetForm()
     } catch (error) {
       console.error("Error al guardar producto:", error)
@@ -248,6 +262,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
           delete nextProducts[id]
           return nextProducts
         })
+        await onProductsChanged?.()
         toast({
           title: "Producto eliminado",
           description: "El producto se eliminó correctamente"
@@ -266,28 +281,32 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const handleToggleVisibility = async (producto: Producto) => {
     if (!userId || !producto.id) return
 
-    const currentProduct = productosFuente?.[producto.id] || producto
+    const currentProduct = productos[producto.id] || producto
     const nextVisibleState = currentProduct.visibleEnTienda === false
     const updatedProduct = {
       ...currentProduct,
       visibleEnTienda: nextVisibleState,
+      visibleInStore: nextVisibleState,
       fechaActualizacion: new Date().toISOString(),
       usuarioId: userId,
       tiendaId: userId,
     }
 
     try {
+      setVisibilityLoadingId(producto.id)
       await toggleStoreProductVisibility(userId, producto.id, nextVisibleState)
       setProductos((current) => ({
         ...current,
         [producto.id as string]: updatedProduct,
       }))
       toast({
-        title: nextVisibleState ? "Producto visible" : "Producto oculto",
+        title: nextVisibleState ? "Visible" : "Oculto",
         description: nextVisibleState
-          ? "El producto ahora se muestra en la tienda pública."
-          : "El producto quedó oculto para los clientes.",
+          ? "Se mostró en la tienda."
+          : "Se ocultó en la tienda.",
+        duration: 1800,
       })
+      await onProductsChanged?.()
     } catch (error) {
       console.error("Error al cambiar visibilidad del producto:", error)
       toast({
@@ -295,6 +314,8 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
         description: "No se pudo actualizar la visibilidad del producto",
         variant: "destructive"
       })
+    } finally {
+      setVisibilityLoadingId(null)
     }
   }
 
@@ -339,7 +360,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
     setCurrentPage(1)
   }
 
-  const productosFiltrados = Object.entries(productosFuente || {})
+  const productosFiltrados = Object.entries(productos || {})
     .filter(([id, producto]) => {
       const matchesSearch = producto.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            producto.descripcion?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -352,7 +373,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
   const startIndex = (currentPage - 1) * itemsPerPage
   const productosPaginados = productosFiltrados.slice(startIndex, startIndex + itemsPerPage)
 
-  const categorias = [...new Set(Object.values(productosFuente || {}).map(p => p.categoria).filter(Boolean))]
+  const categorias = [...new Set(Object.values(productos || {}).map(p => p.categoria).filter(Boolean))]
 
   if (!userId) {
     return (
@@ -470,6 +491,7 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
                       onClick={() => handleToggleVisibility(producto)}
                       className="text-left cursor-pointer"
                       title={producto.visibleEnTienda === false ? "Mostrar en tienda" : "Ocultar en tienda"}
+                      disabled={visibilityLoadingId === producto.id}
                     >
                       <Badge
                         className={`font-semibold py-1 px-3 rounded-full shadow-md transition-colors ${
@@ -478,7 +500,14 @@ export default function TiendaTab({ productos: productosProp, user }: { producto
                             : "bg-emerald-500 text-white hover:bg-emerald-600"
                         }`}
                       >
-                        {producto.visibleEnTienda === false ? "Oculto" : "Visible"}
+                        {visibilityLoadingId === producto.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Actualizando
+                          </span>
+                        ) : (
+                          <span>{producto.visibleEnTienda === false ? "Oculto" : "Visible"}</span>
+                        )}
                       </Badge>
                     </button>
                   </div>

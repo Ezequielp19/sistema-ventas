@@ -15,6 +15,7 @@ import {
   normalizeCatalogProduct,
   sanitizeFirestoreData,
 } from "@/lib/product-sync"
+import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 import {
   createProduct,
   deleteProduct,
@@ -190,12 +191,23 @@ const loadFirestoreStoreConfig = async (businessId: string): Promise<StoreConfig
 }
 
 export const loadStoreConfig = async (businessId: string): Promise<StoreConfig | null> => {
+  const cachedConfig = getBusinessCache<StoreConfig>("store", businessId, "config")
+  if (cachedConfig) {
+    return cachedConfig
+  }
+
   const firestoreConfig = await loadFirestoreStoreConfig(businessId)
   if (firestoreConfig) {
+    setBusinessCache("store", businessId, firestoreConfig, "config")
     return firestoreConfig
   }
 
-  return loadLegacyStoreConfig(businessId)
+  const legacyConfig = await loadLegacyStoreConfig(businessId)
+  if (legacyConfig) {
+    setBusinessCache("store", businessId, legacyConfig, "config")
+  }
+
+  return legacyConfig
 }
 
 export const watchStoreConfig = (
@@ -221,7 +233,14 @@ export const watchStoreConfig = (
 
     const emitLegacyConfig = () => {
       const mergedConfig = mergeLegacyStoreConfigs(legacyStoreConfig, legacyUserConfig)
-      callback(hasMeaningfulConfigData(mergedConfig) ? mergedConfig : null)
+      if (hasMeaningfulConfigData(mergedConfig)) {
+        setBusinessCache("store", businessId, mergedConfig, "config")
+        callback(mergedConfig)
+        return
+      }
+
+      invalidateBusinessCache(businessId, ["store", "public-store"])
+      callback(null)
     }
 
     const unsubscribeUser = onValue(getLegacyUserStoreConfigRef(businessId), (snapshot) => {
@@ -244,10 +263,13 @@ export const watchStoreConfig = (
     getFirestoreStoreConfigDocRef(businessId),
     (snapshot) => {
       if (snapshot.exists()) {
-        callback(normalizeStoreConfig(snapshot.data() as Record<string, any>))
+        const normalizedConfig = normalizeStoreConfig(snapshot.data() as Record<string, any>)
+        setBusinessCache("store", businessId, normalizedConfig, "config")
+        callback(normalizedConfig)
         return
       }
 
+      invalidateBusinessCache(businessId, ["store", "public-store"])
       startFallback()
     },
     (error) => {
@@ -288,10 +310,14 @@ export const saveStoreConfig = async (businessId: string, config: StoreConfig): 
   })
   const firestorePayload = sanitizeFirestoreData(normalizedConfig)
 
-  await Promise.all([
-    setDoc(getFirestoreStoreConfigDocRef(businessId), firestorePayload),
-    saveLegacyStoreConfig(businessId, normalizedConfig),
-  ])
+  try {
+    await Promise.all([
+      setDoc(getFirestoreStoreConfigDocRef(businessId), firestorePayload),
+      saveLegacyStoreConfig(businessId, normalizedConfig),
+    ])
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 }
 
 export const loadStoreProducts = async (businessId: string): Promise<ProductCollection> => {
@@ -393,6 +419,14 @@ const filterPublicProducts = (products: ProductCollection): ProductCollection =>
 }
 
 export const loadPublicStore = async (businessId: string) => {
+  const cachedPublicStore = getBusinessCache<{
+    config: StoreConfig | null
+    products: ProductCollection
+  }>("public-store", businessId, "public")
+  if (cachedPublicStore) {
+    return cachedPublicStore
+  }
+
   const config = await loadStoreConfig(businessId)
 
   let products: ProductCollection = {}
@@ -418,10 +452,14 @@ export const loadPublicStore = async (businessId: string) => {
     }
   }
 
-  return {
+  const publicStore = {
     config,
     products,
   }
+
+  setBusinessCache("public-store", businessId, publicStore, "public")
+
+  return publicStore
 }
 
 export const uploadStoreProductPhoto = async (businessId: string, file: File): Promise<string> => {

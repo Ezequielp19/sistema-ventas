@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useState, useEffect } from "react"
 import { ref, onValue } from "firebase/database"
 import { database } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
@@ -66,6 +66,19 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
   const { firebaseAuthReady, firebaseUser, isLoading: authLoading } = useAuth()
   const [dashboardData, setDashboardData] = useState<DashboardSummary>(emptyDashboardSummary)
   const businessId = user?.id || user?.uid || firebaseUser?.uid || ""
+
+  const refreshDashboardData = useCallback(async () => {
+    if (!businessId || authLoading || !firebaseAuthReady || !firebaseUser) {
+      return
+    }
+
+    try {
+      const summary = await loadDashboardSummary(businessId)
+      setDashboardData(summary)
+    } catch (error) {
+      console.error("Error al refrescar el resumen del dashboard:", error)
+    }
+  }, [businessId, authLoading, firebaseAuthReady, firebaseUser])
 
   useEffect(() => {
     if (authLoading || !firebaseAuthReady || !firebaseUser || !businessId) {
@@ -445,7 +458,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
           </div>
 
           <TabsContent value="productos">
-            <ProductosTab proveedores={providers} />
+            <ProductosTab proveedores={providers} onProductsChanged={refreshDashboardData} />
           </TabsContent>
 
           <TabsContent value="proveedores">
@@ -462,7 +475,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
           </TabsContent>
 
           <TabsContent value="tienda">
-            <TiendaTab productos={products as any} user={user as any} />
+            <TiendaTab productos={products as any} user={user as any} onProductsChanged={refreshDashboardData} />
           </TabsContent>
 
           <TabsContent value="stock">

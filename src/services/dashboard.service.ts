@@ -1,6 +1,7 @@
 import { collection, getDocs } from "firebase/firestore"
 import { firestore } from "@/src/lib/firebase/client"
 import { normalizeCatalogProduct, type ProductRecord } from "@/lib/product-sync"
+import { getBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 import { loadMergedProducts } from "@/src/services/products.service"
 import {
   loadProviders,
@@ -451,6 +452,11 @@ export const loadDashboardSummary = async (businessId: string): Promise<Dashboar
     }
   }
 
+  const cachedSummary = getBusinessCache<DashboardSummary>("dashboard", businessId)
+  if (cachedSummary) {
+    return cachedSummary
+  }
+
   const [productsResult, providersResult, salesResult] = await Promise.all([
     loadProductsData(businessId),
     loadProvidersData(businessId),
@@ -459,7 +465,7 @@ export const loadDashboardSummary = async (businessId: string): Promise<Dashboar
 
   const metrics = buildDashboardMetrics(productsResult.data, providersResult.data, salesResult.data)
 
-  return {
+  const summary: DashboardSummary = {
     products: productsResult.data,
     providers: providersResult.data,
     sales: salesResult.data,
@@ -470,4 +476,8 @@ export const loadDashboardSummary = async (businessId: string): Promise<Dashboar
       sales: salesResult.legacyUsed,
     },
   }
+
+  setBusinessCache("dashboard", businessId, summary)
+
+  return summary
 }

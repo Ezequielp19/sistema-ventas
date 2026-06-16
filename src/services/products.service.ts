@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
 import { mergePublicCatalogCollections, normalizeCatalogProduct, sanitizeFirestoreData } from "@/lib/product-sync"
+import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 
 export type ProductRecord = Record<string, any>
 export type ProductCollection = Record<string, ProductRecord>
@@ -484,6 +485,11 @@ export const loadMergedProducts = async (businessId: string): Promise<ProductCol
     return {}
   }
 
+  const cachedProducts = getBusinessCache<ProductCollection>("products", businessId)
+  if (cachedProducts) {
+    return cachedProducts
+  }
+
   const [firestoreProducts, legacyProducts] = await Promise.all([
     loadAllFirestoreProducts(businessId),
     normalizeLegacyProducts(businessId),
@@ -491,6 +497,7 @@ export const loadMergedProducts = async (businessId: string): Promise<ProductCol
 
   if (Object.keys(firestoreProducts).length === 0 && Object.keys(legacyProducts).length > 0) {
     await syncFirestoreProducts(businessId, legacyProducts)
+    setBusinessCache("products", businessId, legacyProducts)
     return legacyProducts
   }
 
@@ -505,7 +512,9 @@ export const loadMergedProducts = async (businessId: string): Promise<ProductCol
     await syncFirestoreProducts(businessId, missingLegacyProducts)
   }
 
-  return mergePublicCatalogCollections(firestoreProducts, legacyProducts)
+  const mergedProducts = mergePublicCatalogCollections(firestoreProducts, legacyProducts)
+  setBusinessCache("products", businessId, mergedProducts)
+  return mergedProducts
 }
 
 export const watchMergedProducts = (
@@ -521,7 +530,9 @@ export const watchMergedProducts = (
   let legacyProducts: ProductCollection = {}
 
   const emit = () => {
-    callback(mergePublicCatalogCollections(userProducts, legacyProducts))
+    const mergedProducts = mergePublicCatalogCollections(userProducts, legacyProducts)
+    setBusinessCache("products", businessId, mergedProducts)
+    callback(mergedProducts)
   }
 
   const unsubscribeUser = onValue(getLegacyUserProductsRef(businessId), (snapshot) => {
@@ -553,10 +564,14 @@ export const saveProduct = async (
   const normalizedProduct = normalizeProductForWrite(businessId, productId, productData, existingProduct ?? {})
   const firestoreProductData = sanitizeFirestoreData(normalizedProduct)
 
-  await Promise.all([
-    setDoc(getFirestoreProductDocRef(businessId, productId), firestoreProductData),
-    writeProductMirrors(businessId, productId, firestoreProductData),
-  ])
+  try {
+    await Promise.all([
+      setDoc(getFirestoreProductDocRef(businessId, productId), firestoreProductData),
+      writeProductMirrors(businessId, productId, firestoreProductData),
+    ])
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 }
 
 export const createProduct = async (businessId: string, productData: ProductRecord): Promise<string> => {
@@ -574,10 +589,14 @@ export const deleteProduct = async (businessId: string, productId: string): Prom
     return
   }
 
-  await Promise.all([
-    deleteDoc(getFirestoreProductDocRef(businessId, productId)),
-    deleteProductMirrors(businessId, productId),
-  ])
+  try {
+    await Promise.all([
+      deleteDoc(getFirestoreProductDocRef(businessId, productId)),
+      deleteProductMirrors(businessId, productId),
+    ])
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 }
 
 export const updateProduct = async (
@@ -594,6 +613,8 @@ export const updateProduct = async (
     ...(existingProduct ?? {}),
     ...normalizeProductUpdatePayload(updates),
   })
+
+  invalidateBusinessCache(businessId)
 }
 
 export const bulkUpdateProducts = async (
@@ -610,6 +631,7 @@ export const bulkUpdateProducts = async (
   }
 
   await Promise.all(updateEntries.map(([productId, productUpdates]) => updateProduct(businessId, productId, productUpdates)))
+  invalidateBusinessCache(businessId)
 }
 
 export const setProductStock = async (businessId: string, productId: string, stock: number): Promise<void> => {
@@ -617,6 +639,8 @@ export const setProductStock = async (businessId: string, productId: string, sto
     stock,
     fechaActualizacion: new Date().toISOString(),
   })
+
+  invalidateBusinessCache(businessId)
 }
 
 export const setProductVisibility = async (
@@ -629,4 +653,6 @@ export const setProductVisibility = async (
     visibleEnTienda,
     fechaActualizacion: new Date().toISOString(),
   })
+
+  invalidateBusinessCache(businessId)
 }

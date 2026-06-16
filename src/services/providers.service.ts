@@ -2,6 +2,7 @@ import { get, ref, remove, set } from "firebase/database"
 import { collection, doc, getDoc, getDocs, setDoc } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
 import { sanitizeFirestoreData } from "@/lib/product-sync"
+import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 import { bulkUpdateProducts, type ProductCollection, type ProductRecord } from "@/src/services/products.service"
 
 export type ProviderRecord = Record<string, any>
@@ -189,11 +190,15 @@ export const migrateLegacyProvidersToFirestore = async (businessId: string): Pro
     return {}
   }
 
-  await Promise.all(
-    migrationEntries.map(([providerId, providerData]) =>
-      setDoc(getProviderDocRef(businessId, providerId), sanitizeFirestoreData(providerData)),
-    ),
-  )
+  try {
+    await Promise.all(
+      migrationEntries.map(([providerId, providerData]) =>
+        setDoc(getProviderDocRef(businessId, providerId), sanitizeFirestoreData(providerData)),
+      ),
+    )
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 
   return legacyProviders
 }
@@ -201,6 +206,11 @@ export const migrateLegacyProvidersToFirestore = async (businessId: string): Pro
 export const loadProviders = async (businessId: string): Promise<ProviderCollection> => {
   if (!businessId) {
     return {}
+  }
+
+  const cachedProviders = getBusinessCache<ProviderCollection>("providers", businessId)
+  if (cachedProviders) {
+    return cachedProviders
   }
 
   let firestoreProviders: ProviderCollection = {}
@@ -244,6 +254,8 @@ export const loadProviders = async (businessId: string): Promise<ProviderCollect
 
   await Promise.allSettled([mirrorActiveProvidersToLegacy(businessId, activeProviders)])
 
+  setBusinessCache("providers", businessId, activeProviders)
+
   return activeProviders
 }
 
@@ -260,12 +272,16 @@ export const saveProvider = async (
   const normalizedProvider = normalizeProviderForWrite(businessId, providerId, providerData, existingProvider ?? {})
   const firestoreProviderData = sanitizeFirestoreData(normalizedProvider)
 
-  await Promise.all([
-    setDoc(getProviderDocRef(businessId, providerId), firestoreProviderData),
-    normalizedProvider.activo === false
-      ? remove(getLegacyProviderRef(businessId, providerId))
-      : set(getLegacyProviderRef(businessId, providerId), firestoreProviderData),
-  ])
+  try {
+    await Promise.all([
+      setDoc(getProviderDocRef(businessId, providerId), firestoreProviderData),
+      normalizedProvider.activo === false
+        ? remove(getLegacyProviderRef(businessId, providerId))
+        : set(getLegacyProviderRef(businessId, providerId), firestoreProviderData),
+    ])
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 }
 
 export const createProvider = async (businessId: string, providerData: ProviderRecord): Promise<string> => {
@@ -297,10 +313,14 @@ export const deleteProvider = async (businessId: string, providerId: string): Pr
     existingProvider ?? {},
   )
 
-  await Promise.all([
-    setDoc(getProviderDocRef(businessId, providerId), sanitizeFirestoreData(deactivatedProvider)),
-    remove(getLegacyProviderRef(businessId, providerId)),
-  ])
+  try {
+    await Promise.all([
+      setDoc(getProviderDocRef(businessId, providerId), sanitizeFirestoreData(deactivatedProvider)),
+      remove(getLegacyProviderRef(businessId, providerId)),
+    ])
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 }
 
 export const setProviderActive = async (
@@ -326,12 +346,16 @@ export const setProviderActive = async (
     existingProvider ?? {},
   )
 
-  await Promise.all([
-    setDoc(getProviderDocRef(businessId, providerId), sanitizeFirestoreData(updatedProvider)),
-    active
-      ? set(getLegacyProviderRef(businessId, providerId), sanitizeFirestoreData(updatedProvider))
-      : remove(getLegacyProviderRef(businessId, providerId)),
-  ])
+  try {
+    await Promise.all([
+      setDoc(getProviderDocRef(businessId, providerId), sanitizeFirestoreData(updatedProvider)),
+      active
+        ? set(getLegacyProviderRef(businessId, providerId), sanitizeFirestoreData(updatedProvider))
+        : remove(getLegacyProviderRef(businessId, providerId)),
+    ])
+  } finally {
+    invalidateBusinessCache(businessId)
+  }
 }
 
 export const adjustProductPricesByProvider = async (
