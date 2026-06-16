@@ -698,7 +698,7 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
                   <Label>Seleccionar Venta</Label>
                   <Select onValueChange={(value) => {
                     const venta = ventasSinFacturar.find(v => v.id === value)
-                    setSelectedVenta(venta)
+                    setSelectedVenta(venta ?? null)
                   }}>
                     <SelectTrigger>
                       <SelectValue placeholder="Selecciona una venta sin facturar" />

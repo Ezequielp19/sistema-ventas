@@ -1,6 +1,8 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import type { ButtonProps } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 
 interface PaginationProps {
@@ -72,16 +74,22 @@ export function Pagination({ currentPage, totalPages, onPageChange }: Pagination
   )
 }
 
-export const PaginationContent = ({ children }) => <div className="join">{children}</div>
-export const PaginationItem = ({ children }) => <>{children}</>
-export const PaginationLink = ({ children }) => <Button className="join-item">{children}</Button>
+type PaginationSlotProps = {
+  children?: ReactNode
+}
+
+type PaginationActionProps = Pick<ButtonProps, "onClick" | "disabled">
+
+export const PaginationContent = ({ children }: PaginationSlotProps) => <div className="join">{children}</div>
+export const PaginationItem = ({ children }: PaginationSlotProps) => <>{children}</>
+export const PaginationLink = ({ children }: PaginationSlotProps) => <Button className="join-item">{children}</Button>
 export const PaginationEllipsis = () => <span>...</span>
-export const PaginationPrevious = ({ onClick, disabled }) => (
+export const PaginationPrevious = ({ onClick, disabled }: PaginationActionProps) => (
   <Button onClick={onClick} disabled={disabled}>
     Previous
   </Button>
 )
-export const PaginationNext = ({ onClick, disabled }) => (
+export const PaginationNext = ({ onClick, disabled }: PaginationActionProps) => (
   <Button onClick={onClick} disabled={disabled}>
     Next
   </Button>
