@@ -13,27 +13,9 @@ import { Pagination } from "@/components/ui/pagination"
 import { useClient } from "@/hooks/use-client"
 import { ClientOnly } from "@/components/client-only"
 import { loadPublicStore } from "@/src/services/store.service"
+import { normalizeCatalogProduct } from "@/lib/product-sync"
 
-interface Producto {
-  id?: string
-  nombre: string
-  descripcion: string
-  precio?: number
-  precioVenta?: number
-  stock: number
-  categoria?: string
-  tipo?: string
-  imagen?: string
-  imageUrl?: string
-  thumbUrl?: string
-  imagePath?: string
-  thumbPath?: string
-  imageUpdatedAt?: string
-  imagenes?: string[]
-  destacado?: boolean
-  activo?: boolean
-  visibleEnTienda?: boolean
-}
+type Producto = ReturnType<typeof normalizeCatalogProduct>
 
 interface TiendaConfig {
   nombre: string
@@ -106,43 +88,44 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
   }, [userId])
 
   const productosFiltrados = Object.entries(productos || {})
-    .map(([id, producto]) => ({ 
-      ...producto, 
-      id,
-      // Normalizar campos: usar precioVenta si existe, sino precio
-      precio: producto.precioVenta || producto.precio || 0,
-      // Normalizar categoría: usar categoria si existe, sino tipo
-      categoria: producto.categoria || producto.tipo || "",
-      // Asegurar que activo sea boolean (por defecto true si no está definido)
-      activo: producto.activo !== false
-    }))
-    .filter(producto => {
-      if (producto.visibleEnTienda === false) return false
+    .map(([id, producto]) => normalizeCatalogProduct({ ...producto, id }, id) as Producto)
+    .filter((producto) => {
+      if (producto.visibleInStore === false || producto.visibleEnTienda === false) return false
 
-      // Filtrar productos activos con stock > 0
-      const isActive = producto.activo !== false && producto.stock > 0
+      const isActive = producto.active !== false && producto.activo !== false && Number(producto.stock ?? 0) > 0
       if (!isActive) return false
 
-      const matchesSearch = searchTerm.trim() === '' ||
-                           producto.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           producto.descripcion?.toLowerCase().includes(searchTerm.toLowerCase())
-      
-      const matchesCategoria = filterCategoria === "todas" || !filterCategoria || producto.categoria === filterCategoria
-      
+      const search = searchTerm.trim().toLowerCase()
+      const matchesSearch =
+        search === "" ||
+        producto.nombre?.toLowerCase().includes(search) ||
+        producto.name?.toLowerCase().includes(search) ||
+        producto.descripcion?.toLowerCase().includes(search) ||
+        producto.description?.toLowerCase().includes(search)
+
+      const productCategory = producto.categoria || producto.category || producto.tipo || producto.type || ""
+      const matchesCategoria = filterCategoria === "todas" || !filterCategoria || productCategory === filterCategoria
+
       return matchesSearch && matchesCategoria
     })
 
   const totalPages = Math.ceil(productosFiltrados.length / itemsPerPage)
   const productosPaginados = productosFiltrados.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
-  const categorias = [...new Set(Object.values(productos || {}).map(p => p.categoria || p.tipo).filter(Boolean))] as string[]
+  const categorias = [...new Set(Object.values(productos || {}).map((p) => p.categoria || p.category || p.tipo || p.type).filter(Boolean))] as string[]
+
+  const getProductPrice = (producto: Producto) => {
+    const rawPrice = producto.salePrice ?? producto.precioVenta ?? producto.precio ?? 0
+    const parsedPrice = typeof rawPrice === "number" ? rawPrice : Number(rawPrice)
+    return Number.isFinite(parsedPrice) ? parsedPrice : 0
+  }
 
   const generateWhatsAppMessage = (producto: Producto) => {
     return encodeURIComponent(
       `¡Hola! Quiero comprar:\n\n` +
       `*${producto.nombre}*\n` +
       `${producto.descripcion}\n\n` +
-      `💰 Precio: $${producto.precio}\n` +
+      `💰 Precio: $${getProductPrice(producto)}\n` +
       `📦 Stock disponible: ${producto.stock} unidades\n\n` +
       `¿Tienes stock disponible?`
     )
@@ -344,36 +327,17 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
                 >
                   <div className="relative">
                     <div className="aspect-video w-full overflow-hidden relative group">
-                      {producto.imagenes && producto.imagenes.length > 0 ? (
-                        <>
-                          <img
-                            src={producto.imagenes[0]}
-                            alt={producto.nombre}
-                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                          />
-                          {producto.imagenes.length > 1 && (
-                            <>
-                              <div className="absolute bottom-1.5 sm:bottom-2 left-1/2 transform -translate-x-1/2 flex gap-0.5 sm:gap-1">
-                                {producto.imagenes.map((_, index) => (
-                                  <div
-                                    key={index}
-                                    className={`h-1 sm:h-1.5 rounded-full transition-all ${
-                                      index === 0 ? 'w-4 sm:w-6 bg-white' : 'w-1 sm:w-1.5 bg-white/50'
-                                    }`}
-                                  />
-                                ))}
-                              </div>
-                              <div className="absolute top-1.5 sm:top-2 right-1.5 sm:right-2 bg-black/50 text-white text-[10px] sm:text-xs px-1 sm:px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full">
-                                {producto.imagenes.length} {producto.imagenes.length === 1 ? 'foto' : 'fotos'}
-                              </div>
-                            </>
-                          )}
-                        </>
-                      ) : (
-                        <div className="w-full h-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
-                          <Image className="h-16 w-16 text-slate-400 dark:text-slate-500" />
-                        </div>
-                      )}
+                    {producto.thumbUrl || producto.imageUrl || producto.imagen ? (
+                      <img
+                        src={producto.thumbUrl || producto.imageUrl || producto.imagen}
+                        alt={producto.nombre}
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
+                        <Image className="h-16 w-16 text-slate-400 dark:text-slate-500" />
+                      </div>
+                    )}
                     </div>
                     {producto.destacado && (
                       <Badge className="absolute top-3 left-3 bg-amber-400 text-amber-900 font-semibold py-1 px-3 rounded-full shadow-md z-10">
@@ -384,9 +348,9 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
 
                   <CardContent className="p-3 sm:p-4 md:p-5 flex flex-col flex-grow">
                     <div className="space-y-2 sm:space-y-3 flex-grow">
-                      {producto.categoria && (
+                      {(producto.categoria || producto.category || producto.tipo || producto.type) && (
                         <Badge variant="outline" className="text-[10px] sm:text-xs font-medium text-indigo-600 border-indigo-300 dark:text-indigo-400 dark:border-indigo-500/50">
-                          {producto.categoria}
+                          {producto.categoria || producto.category || producto.tipo || producto.type}
                         </Badge>
                       )}
                       <h3 className="font-bold text-lg sm:text-xl text-slate-900 dark:text-white line-clamp-2 min-h-[3rem]">{producto.nombre}</h3>
@@ -396,7 +360,7 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
                       
                       <div className="flex items-baseline justify-between pt-2 flex-wrap gap-2">
                         <span className="text-xl sm:text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-                          ${producto.precio}
+                          ${getProductPrice(producto)}
                         </span>
                         <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
                           Stock: {producto.stock}
@@ -547,9 +511,9 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
                           </div>
                         )}
                       </>
-                    ) : selectedProduct.imageUrl || selectedProduct.imagen ? (
+                    ) : selectedProduct.imageUrl || selectedProduct.thumbUrl || selectedProduct.imagen ? (
                       <img
-                        src={selectedProduct.imageUrl || selectedProduct.imagen}
+                        src={selectedProduct.imageUrl || selectedProduct.thumbUrl || selectedProduct.imagen}
                         alt={selectedProduct.nombre}
                         className="w-full h-full object-cover"
                       />
@@ -589,7 +553,7 @@ export default function TiendaPublica({ params }: { params: Promise<{ userId: st
                     <div>
                       <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">Precio</p>
                       <p className="text-3xl sm:text-4xl font-bold text-indigo-600 dark:text-indigo-400">
-                        ${selectedProduct.precio}
+                        ${getProductPrice(selectedProduct)}
                       </p>
                     </div>
                     <div>
