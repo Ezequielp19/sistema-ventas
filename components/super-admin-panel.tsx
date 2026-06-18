@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, type FormEvent } from "react"
-import { ref, get, set, push, remove } from "firebase/database"
+import { useState, useEffect, useRef, type FormEvent } from "react"
+import { ref, get, push, remove } from "firebase/database"
 import { initializeApp, getApps } from "firebase/app"
 import {
   createUserWithEmailAndPassword,
@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { 
@@ -35,16 +36,30 @@ import {
   UserX,
   UserCheck,
   Database,
+  BellRing,
+  BadgeDollarSign,
+  Wallet,
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { seedDemoDataForBusiness } from "@/src/services/demo-data.service"
+import {
+  addMonthsToDateString,
+  calculateBillingStatus,
+  formatBillingDate,
+  loadBusinessBillingRecord,
+  resolveBillingStatus,
+  saveBusinessBillingRecord,
+  todayDateString,
+  type BillingStatus,
+  type BusinessBillingRecord,
+} from "@/src/services/business-billing.service"
 
 // Configuración de EmailJS
-const EMAILJS_CONFIG = {
-  serviceId: "service_f0e608c",
-  templateId: "template_m8gla55",
-  publicKey: "HV8KNcQorsxYP088j"
-}
+const EMAILJS_SERVICE_ID = "service_161dv6f"
+const EMAILJS_PUBLIC_KEY = "QLg98FNv2a5z4ZK77"
+const ACCOUNT_CREATION_TEMPLATE_ID = "template_njhbffj"
+const PAYMENT_REMINDER_TEMPLATE_ID = "template_fheag2h"
+const GESTIONPRO_CONTACT_EMAIL = "gestionproinfo@gmail.com"
 
 const APP_URL = "https://sistema-ventas-lilac.vercel.app/"
 const SUPER_ADMIN_EMAIL = "adminatenea@software.com"
@@ -66,9 +81,18 @@ type UserFormData = {
   empresa: string
   rol: string
   activo: boolean
+  plan: string
+  precioMensual: string
+  fechaAlta: string
+  ultimoPago: string
+  proximoPago: string
+  diasAvisoPago: string
+  estadoPago: BillingStatus
+  pagoActivo: boolean
+  paymentNotes: string
 }
 
-type InternalUserRecord = {
+type InternalUserRecord = Partial<BusinessBillingRecord> & {
   nombre?: string
   email?: string
   password?: string
@@ -85,6 +109,11 @@ type InternalUserRecord = {
   fechaActualizacion?: string
   creadoPor?: string
 }
+
+type PaymentNotice = {
+  type: "success" | "error"
+  message: string
+} | null
 
 type ErrorDetails = {
   code: string
@@ -106,7 +135,13 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [sendingEmail, setSendingEmail] = useState(false)
+  const [savingUser, setSavingUser] = useState(false)
   const [demoLoadingUserId, setDemoLoadingUserId] = useState<string | null>(null)
+  const [paymentFilter, setPaymentFilter] = useState<"all" | BillingStatus>("all")
+  const [paymentAction, setPaymentAction] = useState<{ userId: string; type: "mark_paid" | "reminder" } | null>(null)
+  const [paymentNotice, setPaymentNotice] = useState<PaymentNotice>(null)
+  const paymentNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialPaymentStatusRef = useRef<BillingStatus>("al_dia")
 
   const [userFormData, setUserFormData] = useState<UserFormData>({
     nombre: "",
@@ -114,7 +149,16 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     password: "",
     empresa: "",
     rol: "user",
-    activo: true
+    activo: true,
+    plan: "mensual",
+    precioMensual: "0",
+    fechaAlta: todayDateString(),
+    ultimoPago: todayDateString(),
+    proximoPago: addMonthsToDateString(todayDateString(), 1),
+    diasAvisoPago: "3",
+    estadoPago: "al_dia",
+    pagoActivo: true,
+    paymentNotes: "",
   })
 
   const normalizeEmail = (value: string) => value.trim().toLowerCase()
@@ -159,6 +203,131 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     }
   }
 
+  const getDefaultUserFormData = (): UserFormData => {
+    const currentDate = todayDateString()
+
+    return {
+      nombre: "",
+      email: "",
+      password: generatePassword(),
+      empresa: "",
+      rol: "user",
+      activo: true,
+      plan: "mensual",
+      precioMensual: "0",
+      fechaAlta: currentDate,
+      ultimoPago: currentDate,
+      proximoPago: addMonthsToDateString(currentDate, 1),
+      diasAvisoPago: "3",
+      estadoPago: "al_dia",
+      pagoActivo: true,
+      paymentNotes: "",
+    }
+  }
+
+  const buildPaymentFormData = (userData: InternalUserRecord): Pick<
+    UserFormData,
+    "plan" | "precioMensual" | "fechaAlta" | "ultimoPago" | "proximoPago" | "diasAvisoPago" | "estadoPago" | "pagoActivo" | "paymentNotes"
+  > => {
+    const resolvedStatus = resolveBillingStatus(userData)
+    const fechaAlta = userData.fechaAlta || userData.createdAt || todayDateString()
+    const ultimoPago = userData.ultimoPago || fechaAlta
+    const proximoPago = userData.proximoPago || addMonthsToDateString(ultimoPago, 1)
+
+    return {
+      plan: userData.plan || "mensual",
+      precioMensual: String(userData.precioMensual ?? 0),
+      fechaAlta,
+      ultimoPago,
+      proximoPago,
+      diasAvisoPago: String(userData.diasAvisoPago ?? 3),
+      estadoPago: resolvedStatus.estadoPago,
+      pagoActivo: userData.pagoActivo !== false,
+      paymentNotes: userData.paymentNotes || "",
+    }
+  }
+
+  const buildFormDataForRecord = (userData: InternalUserRecord): UserFormData => {
+    return {
+      nombre: userData.nombre || "",
+      email: userData.email || "",
+      password: userData.password || "",
+      empresa: userData.empresa || "",
+      rol: userData.rol || "user",
+      activo: userData.activo !== false,
+      ...buildPaymentFormData(userData),
+    }
+  }
+
+  const showPaymentNotice = (type: "success" | "error", message: string) => {
+    setPaymentNotice({ type, message })
+
+    if (paymentNoticeTimerRef.current) {
+      clearTimeout(paymentNoticeTimerRef.current)
+    }
+
+    paymentNoticeTimerRef.current = setTimeout(() => {
+      setPaymentNotice(null)
+      paymentNoticeTimerRef.current = null
+    }, 4000)
+  }
+
+  const computePaymentPayloadFromForm = (
+    formData: UserFormData,
+  ): {
+    plan: string
+    precioMensual: number
+    fechaAlta: string
+    ultimoPago: string
+    proximoPago: string
+    diasAvisoPago: number
+    estadoPago: BillingStatus
+    pagoActivo: boolean
+    paymentNotes: string
+    updatedAt: string
+  } => {
+    const now = new Date().toISOString()
+    const fechaAlta = formData.fechaAlta.trim() || todayDateString()
+    const ultimoPago = formData.ultimoPago.trim() || fechaAlta
+    const proximoPago = formData.proximoPago.trim() || addMonthsToDateString(ultimoPago, 1)
+    const precioMensual = Number(formData.precioMensual)
+    const diasAvisoPago = Number(formData.diasAvisoPago)
+    const calculatedStatus = calculateBillingStatus({
+      proximoPago,
+      diasAvisoPago,
+      pagoActivo: formData.pagoActivo,
+    })
+    const finalStatus: BillingStatus =
+      formData.estadoPago === initialPaymentStatusRef.current ? calculatedStatus.estadoPago : formData.estadoPago
+
+    return {
+      plan: formData.plan.trim() || "mensual",
+      precioMensual: Number.isFinite(precioMensual) ? precioMensual : 0,
+      fechaAlta,
+      ultimoPago,
+      proximoPago,
+      diasAvisoPago: Number.isFinite(diasAvisoPago) ? diasAvisoPago : 3,
+      estadoPago: finalStatus,
+      pagoActivo: formData.pagoActivo,
+      paymentNotes: formData.paymentNotes.trim(),
+      updatedAt: now,
+    }
+  }
+
+  const getPaymentStatusCell = (
+    userData: InternalUserRecord,
+  ): { status: BillingStatus; dueDate: string; diasRestantes: number | null } => {
+    const resolvedStatus = resolveBillingStatus(userData)
+    const dueDate = formatBillingDate(userData.proximoPago)
+    const daysRemaining = resolvedStatus.diasRestantes
+
+    return {
+      status: resolvedStatus.estadoPago,
+      dueDate,
+      diasRestantes: daysRemaining,
+    }
+  }
+
   const buildInternalUserRecord = (
     params: {
       businessId: string
@@ -173,6 +342,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     const normalizedEmail = normalizeEmail(params.formData.email)
     const normalizedCompany = params.formData.empresa.trim()
     const normalizedRole = params.formData.rol || "user"
+    const paymentPayload = computePaymentPayloadFromForm(params.formData)
 
     return {
       ...(params.previousRecord ?? {}),
@@ -186,6 +356,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       rol: normalizedRole,
       role: normalizedRole,
       activo: params.formData.activo,
+      ...paymentPayload,
       createdAt: params.previousRecord?.createdAt || now,
       updatedAt: now,
       fechaCreacion: params.previousRecord?.fechaCreacion || now,
@@ -207,7 +378,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     // Inicializar EmailJS
     try {
       if (!emailjsInitialized) {
-        emailjs.init(EMAILJS_CONFIG.publicKey)
+        emailjs.init(EMAILJS_PUBLIC_KEY)
         emailjsInitialized = true
       }
     } catch (error) {
@@ -226,6 +397,12 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     }
     
     initializeAndLoad()
+
+    return () => {
+      if (paymentNoticeTimerRef.current) {
+        clearTimeout(paymentNoticeTimerRef.current)
+      }
+    }
   }, [])
 
   const loadData = async () => {
@@ -233,7 +410,28 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       await ensureSuperAdminFirebaseAuth()
       
       const usuariosSnapshot = await get(ref(database, "usuarios"))
-      setUsuarios(usuariosSnapshot.val() || {})
+      const usuariosSnapshotValue =
+        usuariosSnapshot.exists() && typeof usuariosSnapshot.val() === "object" && usuariosSnapshot.val() !== null
+          ? usuariosSnapshot.val()
+          : {}
+      const usuariosEntries = await Promise.all(
+        Object.entries(usuariosSnapshotValue).map(async ([id, userData]) => {
+          const normalizedUserData = userData && typeof userData === "object" ? (userData as InternalUserRecord) : {}
+          const billingData = await loadBusinessBillingRecord(id, normalizedUserData)
+          return [
+            id,
+            {
+              ...normalizedUserData,
+              ...(billingData ?? {}),
+              businessId: billingData?.businessId || normalizedUserData.businessId || id,
+              uid: billingData?.uid || normalizedUserData.uid || id,
+              firebaseUid: billingData?.firebaseUid || normalizedUserData.firebaseUid || id,
+            },
+          ] as const
+        }),
+      )
+
+      setUsuarios(Object.fromEntries(usuariosEntries))
       setError("") // Limpiar errores si la carga es exitosa
     } catch (error) {
       console.error("Error al cargar datos:", error)
@@ -261,7 +459,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       
       // Verificar que EmailJS esté inicializado
       if (!emailjsInitialized) {
-        emailjs.init(EMAILJS_CONFIG.publicKey)
+        emailjs.init(EMAILJS_PUBLIC_KEY)
         emailjsInitialized = true
       }
       
@@ -271,14 +469,18 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         user_email: userEmail,
         user_password: userPassword,
         login_url: APP_URL,
-        app_name: "Sistema de Ventas"
+        app_name: "GestiónPro",
+        title: "Bienvenido a GestiónPro",
+        email: GESTIONPRO_CONTACT_EMAIL,
+        reply_to: GESTIONPRO_CONTACT_EMAIL,
+        contact_email: GESTIONPRO_CONTACT_EMAIL,
       }
 
       await emailjs.send(
-        EMAILJS_CONFIG.serviceId,
-        EMAILJS_CONFIG.templateId,
+        EMAILJS_SERVICE_ID,
+        ACCOUNT_CREATION_TEMPLATE_ID,
         templateParams,
-        EMAILJS_CONFIG.publicKey
+        EMAILJS_PUBLIC_KEY
       )
 
       return true
@@ -295,15 +497,60 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     }
   }
 
+  const sendPaymentReminderEmail = async (userData: InternalUserRecord): Promise<boolean> => {
+    try {
+      if (!emailjsInitialized) {
+        emailjs.init(EMAILJS_PUBLIC_KEY)
+        emailjsInitialized = true
+      }
+
+      const templateParams = {
+        to_email: userData.email || "",
+        to_name: userData.nombre || userData.empresa || userData.email || "Cliente",
+        business_name: userData.empresa || userData.nombre || "Cliente",
+        client_name: userData.nombre || userData.empresa || "Cliente",
+        plan: userData.plan || "mensual",
+        precio_mensual: String(userData.precioMensual ?? 0),
+        price_monthly: String(userData.precioMensual ?? 0),
+        proximo_pago: formatBillingDate(userData.proximoPago) || userData.proximoPago || "",
+        next_payment: formatBillingDate(userData.proximoPago) || userData.proximoPago || "",
+        ultimo_pago: formatBillingDate(userData.ultimoPago) || userData.ultimoPago || "",
+        last_payment: formatBillingDate(userData.ultimoPago) || userData.ultimoPago || "",
+        payment_status: userData.estadoPago || "al_dia",
+        payment_notes: userData.paymentNotes || "",
+        app_name: "GestiónPro",
+        email: GESTIONPRO_CONTACT_EMAIL,
+        reply_to: GESTIONPRO_CONTACT_EMAIL,
+        title: "Recordatorio de pago",
+        message:
+          `Hola ${userData.nombre || userData.empresa || "Cliente"}, te recordamos que tu servicio GestiónPro vence el día ${formatBillingDate(userData.proximoPago) || userData.proximoPago || "próximamente"}. ` +
+          "Para mantener activo tu acceso, podés abonar el período correspondiente.",
+        login_url: APP_URL,
+      }
+
+      await emailjs.send(
+        EMAILJS_SERVICE_ID,
+        PAYMENT_REMINDER_TEMPLATE_ID,
+        templateParams,
+        EMAILJS_PUBLIC_KEY,
+      )
+
+      return true
+    } catch (error) {
+      const emailError = getErrorDetails(error)
+      console.error("Error al enviar recordatorio de pago:", {
+        code: emailError.code || "",
+        message: emailError.message,
+        status: emailError.status,
+      })
+      return false
+    }
+  }
+
   const resetUserForm = () => {
-    setUserFormData({
-      nombre: "",
-      email: "",
-      password: generatePassword(),
-      empresa: "",
-      rol: "user",
-      activo: true
-    })
+    const defaultFormData = getDefaultUserFormData()
+    setUserFormData(defaultFormData)
+    initialPaymentStatusRef.current = defaultFormData.estadoPago
     setEditingUser(null)
     setError("")
     setSuccess("")
@@ -313,6 +560,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     e.preventDefault()
     setError("")
     setSuccess("")
+    setSavingUser(true)
 
     const normalizedName = userFormData.nombre.trim()
     const normalizedEmail = normalizeEmail(userFormData.email)
@@ -320,26 +568,31 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
     if (!normalizedName) {
       setError("El nombre es obligatorio")
+      setSavingUser(false)
       return
     }
 
     if (!normalizedEmail) {
       setError("El email es obligatorio")
+      setSavingUser(false)
       return
     }
 
     if (!isValidEmail(normalizedEmail)) {
       setError("Email inválido")
+      setSavingUser(false)
       return
     }
 
     if (!normalizedPassword) {
       setError("La contraseña es obligatoria")
+      setSavingUser(false)
       return
     }
 
     if (normalizedPassword.length < 6) {
       setError("La contraseña debe tener mínimo 6 caracteres")
+      setSavingUser(false)
       return
     }
     
@@ -364,30 +617,35 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
       if (emailExists) {
         setError("Este email ya está registrado")
+        setSavingUser(false)
         return
       }
 
       if (editingUser) {
-        const now = new Date().toISOString()
         const previousUser = usuarios[editingUser] || {}
-        const userData = {
-          ...previousUser,
-          nombre: normalizedName,
-          email: normalizedEmail,
-          password: normalizedPassword,
-          empresa: userFormData.empresa.trim(),
-          rol: userFormData.rol || "user",
-          role: userFormData.rol || "user",
-          activo: userFormData.activo,
-          updatedAt: now,
-          fechaActualizacion: now,
-        }
+        const userData = buildInternalUserRecord({
+          businessId: editingUser,
+          firebaseUid: previousUser.firebaseUid || previousUser.uid || editingUser,
+          formData: {
+            ...userFormData,
+            nombre: normalizedName,
+            email: normalizedEmail,
+            password: normalizedPassword,
+            empresa: userFormData.empresa.trim(),
+            rol: userFormData.rol || "user",
+            activo: userFormData.activo,
+          },
+          previousRecord: previousUser,
+          createdBy: previousUser.creadoPor || user?.email || "",
+        })
 
-        await set(ref(database, `usuarios/${editingUser}`), userData)
+        await saveBusinessBillingRecord(editingUser, userData, userData)
         setSuccess("Usuario actualizado correctamente")
+        showPaymentNotice("success", `Datos actualizados para ${normalizedName || normalizedEmail}.`)
         setShowUserDialog(false)
         resetUserForm()
         loadData()
+        setSavingUser(false)
         return
       }
 
@@ -409,6 +667,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
           businessId: internalUserId,
           firebaseUid,
           formData: {
+            ...userFormData,
             nombre: normalizedName,
             email: normalizedEmail,
             password: normalizedPassword,
@@ -419,14 +678,16 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
           createdBy: user?.email || "",
         })
 
-        await set(newUserRef, userData)
+        await saveBusinessBillingRecord(internalUserId, userData, userData)
 
         const emailSent = await sendWelcomeEmail(normalizedEmail, normalizedName, normalizedPassword)
 
         if (emailSent) {
           setSuccess("Usuario creado correctamente. Email de bienvenida enviado.")
+          showPaymentNotice("success", `Usuario creado para ${normalizedName || normalizedEmail}.`)
         } else {
           setSuccess("Usuario creado correctamente. Usuario creado, pero no se pudo enviar el email.")
+          showPaymentNotice("success", `Usuario creado para ${normalizedName || normalizedEmail}.`)
         }
       } catch (createError) {
         if (authCreatedUser) {
@@ -463,19 +724,19 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       } else {
         setError(`Error al guardar el usuario: ${code ? `${code}: ${message || "Error desconocido"}` : message || "Error desconocido"}`)
       }
+    } finally {
+      setSavingUser(false)
     }
   }
 
   const handleEditUser = (id: string, userData: InternalUserRecord) => {
     setEditingUser(id)
+    const formData = buildFormDataForRecord(userData)
     setUserFormData({
-      nombre: userData.nombre || "",
-      email: userData.email || "",
+      ...formData,
       password: userData.password || "",
-      empresa: userData.empresa || "",
-      rol: userData.rol || "user",
-      activo: userData.activo !== false
     })
+    initialPaymentStatusRef.current = formData.estadoPago
     setShowUserDialog(true)
   }
 
@@ -507,7 +768,12 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       try {
         await ensureSuperAdminFirebaseAuth()
         
-        await set(ref(database, `usuarios/${id}/activo`), newStatus)
+        const updatedUserRecord = {
+          ...userData,
+          activo: newStatus,
+        }
+
+        await saveBusinessBillingRecord(id, updatedUserRecord, updatedUserRecord)
         setSuccess(`Usuario ${statusText} correctamente`)
         loadData()
       } catch (error) {
@@ -519,6 +785,102 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
           setError("Error al cambiar el estado del usuario")
         }
       }
+    }
+  }
+
+  const handleMarkAsPaid = async (id: string, userData: InternalUserRecord) => {
+    if (paymentAction) {
+      return
+    }
+
+    try {
+      setPaymentAction({ userId: id, type: "mark_paid" })
+      await ensureSuperAdminFirebaseAuth()
+
+      const today = todayDateString()
+      const updatedUserRecord = {
+        ...userData,
+        ultimoPago: today,
+        proximoPago: addMonthsToDateString(today, 1),
+        estadoPago: "al_dia" as BillingStatus,
+        pagoActivo: true,
+        updatedAt: new Date().toISOString(),
+      }
+
+      await saveBusinessBillingRecord(id, updatedUserRecord, updatedUserRecord)
+      setUsuarios((currentUsers) => ({
+        ...currentUsers,
+        [id]: {
+          ...currentUsers[id],
+          ...updatedUserRecord,
+        },
+      }))
+      setSuccess("Pago marcado como registrado")
+      showPaymentNotice("success", `Pago actualizado para ${userData.nombre || userData.empresa || userData.email || "el cliente"}.`)
+    } catch (error) {
+      console.error("Error al marcar el pago:", error)
+      const errorDetails = getErrorDetails(error)
+      if (errorDetails.code === "PERMISSION_DENIED") {
+        setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
+      } else {
+        setError("No se pudo actualizar el pago")
+      }
+      showPaymentNotice("error", "No se pudo actualizar el pago")
+    } finally {
+      setPaymentAction(null)
+    }
+  }
+
+  const handleSendPaymentReminder = async (id: string, userData: InternalUserRecord) => {
+    if (paymentAction) {
+      return
+    }
+
+    try {
+      setPaymentAction({ userId: id, type: "reminder" })
+      await ensureSuperAdminFirebaseAuth()
+
+      const reminderSent = await sendPaymentReminderEmail(userData)
+      if (!reminderSent) {
+        showPaymentNotice("error", "No se pudo enviar el recordatorio")
+        setError("No se pudo enviar el recordatorio de pago")
+        return
+      }
+
+      const updatedUserRecord = {
+        ...userData,
+        ultimoRecordatorioPagoEnviadoAt: new Date().toISOString(),
+        paymentReminderCount: Number(userData.paymentReminderCount ?? 0) + 1,
+        updatedAt: new Date().toISOString(),
+      }
+
+      try {
+        await saveBusinessBillingRecord(id, updatedUserRecord, updatedUserRecord)
+        setUsuarios((currentUsers) => ({
+          ...currentUsers,
+          [id]: {
+            ...currentUsers[id],
+            ...updatedUserRecord,
+          },
+        }))
+        setSuccess("Recordatorio enviado correctamente")
+        showPaymentNotice("success", `Recordatorio enviado a ${userData.email || userData.nombre || "el cliente"}.`)
+      } catch (saveError) {
+        console.error("No se pudo guardar el registro del recordatorio:", saveError)
+        setSuccess("Recordatorio enviado, pero no se pudo guardar el registro opcional.")
+        showPaymentNotice("success", `Recordatorio enviado a ${userData.email || userData.nombre || "el cliente"}.`)
+      }
+    } catch (error) {
+      console.error("Error al enviar recordatorio:", error)
+      const errorDetails = getErrorDetails(error)
+      if (errorDetails.code === "PERMISSION_DENIED") {
+        setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
+      } else {
+        setError("No se pudo enviar el recordatorio")
+      }
+      showPaymentNotice("error", "No se pudo enviar el recordatorio")
+    } finally {
+      setPaymentAction(null)
     }
   }
 
@@ -580,8 +942,24 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     ...(userData as InternalUserRecord),
   }))
 
+  const usuariosConPagos = usuariosArray.map((userData) => ({
+    ...userData,
+    paymentInfo: getPaymentStatusCell(userData),
+  }))
+
+  const usuariosFiltrados = paymentFilter === "all"
+    ? usuariosConPagos
+    : usuariosConPagos.filter((userData) => userData.paymentInfo.status === paymentFilter)
+
   const usuariosActivos = usuariosArray.filter(user => user.activo !== false)
   const usuariosInactivos = usuariosArray.filter(user => user.activo === false)
+  const paymentStatusCounts = usuariosConPagos.reduce<Record<"al_dia" | "por_vencer" | "vencido", number>>(
+    (accumulator, userData) => {
+      accumulator[userData.paymentInfo.status] += 1
+      return accumulator
+    },
+    { al_dia: 0, por_vencer: 0, vencido: 0 },
+  )
 
   return (
     <div className="min-h-screen bg-background">
@@ -607,6 +985,13 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       </header>
 
       <main className="max-w-7xl mx-auto px-4 lg:px-8 py-8">
+        {paymentNotice && (
+          <div className="fixed bottom-4 right-4 z-50 w-full max-w-sm">
+            <Alert variant={paymentNotice.type === "error" ? "destructive" : "default"} className="shadow-lg">
+              <AlertDescription className="text-sm">{paymentNotice.message}</AlertDescription>
+            </Alert>
+          </div>
+        )}
         <div className="space-y-6">
           {/* Estadísticas */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -761,15 +1146,124 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                       </Select>
                     </div>
                   </div>
+                  <div className="rounded-lg border border-border/60 p-4 space-y-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <BadgeDollarSign className="h-4 w-4" />
+                      Datos de pago
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="plan">Plan</Label>
+                        <Input
+                          id="plan"
+                          value={userFormData.plan}
+                          onChange={(e) => setUserFormData({ ...userFormData, plan: e.target.value })}
+                          placeholder="mensual"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="precioMensual">Precio mensual</Label>
+                        <Input
+                          id="precioMensual"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={userFormData.precioMensual}
+                          onChange={(e) => setUserFormData({ ...userFormData, precioMensual: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="fechaAlta">Fecha de alta</Label>
+                        <Input
+                          id="fechaAlta"
+                          type="date"
+                          value={userFormData.fechaAlta}
+                          onChange={(e) => setUserFormData({ ...userFormData, fechaAlta: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="ultimoPago">Último pago</Label>
+                        <Input
+                          id="ultimoPago"
+                          type="date"
+                          value={userFormData.ultimoPago}
+                          onChange={(e) => setUserFormData({ ...userFormData, ultimoPago: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="proximoPago">Próximo pago</Label>
+                        <Input
+                          id="proximoPago"
+                          type="date"
+                          value={userFormData.proximoPago}
+                          onChange={(e) => setUserFormData({ ...userFormData, proximoPago: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="diasAvisoPago">Días de aviso</Label>
+                        <Input
+                          id="diasAvisoPago"
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={userFormData.diasAvisoPago}
+                          onChange={(e) => setUserFormData({ ...userFormData, diasAvisoPago: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="estadoPago">Estado de pago</Label>
+                        <Select
+                          value={userFormData.estadoPago}
+                          onValueChange={(value) =>
+                            setUserFormData({ ...userFormData, estadoPago: value as BillingStatus })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="al_dia">Al día</SelectItem>
+                            <SelectItem value="por_vencer">Por vencer</SelectItem>
+                            <SelectItem value="vencido">Vencido</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="pagoActivo">Pago activo</Label>
+                        <Select
+                          value={userFormData.pagoActivo ? "activo" : "inactivo"}
+                          onValueChange={(value) => setUserFormData({ ...userFormData, pagoActivo: value === "activo" })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="activo">Activo</SelectItem>
+                            <SelectItem value="inactivo">Inactivo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="paymentNotes">Notas de pago</Label>
+                        <Textarea
+                          id="paymentNotes"
+                          value={userFormData.paymentNotes}
+                          onChange={(e) => setUserFormData({ ...userFormData, paymentNotes: e.target.value })}
+                          placeholder="Notas internas sobre la suscripción o pagos"
+                          rows={3}
+                        />
+                      </div>
+                    </div>
+                  </div>
                   <div className="flex justify-end space-x-2">
                     <Button type="button" variant="outline" onClick={() => setShowUserDialog(false)}>
                       Cancelar
                     </Button>
-                    <Button type="submit" disabled={sendingEmail}>
-                      {sendingEmail ? (
+                    <Button type="submit" disabled={sendingEmail || savingUser}>
+                      {sendingEmail || savingUser ? (
                         <>
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                          Enviando email...
+                          {sendingEmail ? "Enviando email..." : "Guardando..."}
                         </>
                       ) : (
                         <>
@@ -783,9 +1277,29 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
             </Dialog>
           </div>
 
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: "all", label: "Todos", count: usuariosConPagos.length },
+              { key: "al_dia", label: "Al día", count: paymentStatusCounts.al_dia },
+              { key: "por_vencer", label: "Por vencer", count: paymentStatusCounts.por_vencer },
+              { key: "vencido", label: "Vencidos", count: paymentStatusCounts.vencido },
+            ].map((filterOption) => (
+              <Button
+                key={filterOption.key}
+                type="button"
+                variant={paymentFilter === filterOption.key ? "default" : "outline"}
+                size="sm"
+                onClick={() => setPaymentFilter(filterOption.key as "all" | BillingStatus)}
+              >
+                {filterOption.label} ({filterOption.count})
+              </Button>
+            ))}
+          </div>
+
           <Card>
             <CardContent className="p-0">
-              <Table>
+              <div className="overflow-x-auto">
+              <Table className="min-w-[1280px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nombre</TableHead>
@@ -793,19 +1307,25 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                     <TableHead>Empresa</TableHead>
                     <TableHead>Rol</TableHead>
                     <TableHead>Estado</TableHead>
+                    <TableHead>Plan</TableHead>
+                    <TableHead>Precio</TableHead>
+                    <TableHead>Últ. pago</TableHead>
+                    <TableHead>Próx. pago</TableHead>
+                    <TableHead>Días</TableHead>
+                    <TableHead>Pago</TableHead>
                     <TableHead>Contraseña</TableHead>
                     <TableHead>Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {usuariosArray.length === 0 ? (
+                  {usuariosFiltrados.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
                         No hay usuarios registrados
                       </TableCell>
                     </TableRow>
                   ) : (
-                    usuariosArray.map((userData) => (
+                    usuariosFiltrados.map((userData) => (
                       <TableRow key={userData.id} className={userData.activo === false ? "bg-muted/50" : ""}>
                         <TableCell className="font-medium">{userData.nombre}</TableCell>
                         <TableCell>{userData.email}</TableCell>
@@ -819,6 +1339,32 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                           <Badge variant={userData.activo ? "default" : "destructive"}>
                             {userData.activo ? "Activo" : "Inactivo"}
                           </Badge>
+                        </TableCell>
+                        <TableCell>{userData.plan || "mensual"}</TableCell>
+                        <TableCell>${Number(userData.precioMensual ?? 0).toLocaleString("es-AR")}</TableCell>
+                        <TableCell>{formatBillingDate(userData.ultimoPago) || "-"}</TableCell>
+                        <TableCell>{formatBillingDate(userData.proximoPago) || "-"}</TableCell>
+                        <TableCell>
+                          {userData.paymentInfo.diasRestantes === null
+                            ? "-"
+                            : `${userData.paymentInfo.diasRestantes} día${Math.abs(userData.paymentInfo.diasRestantes) === 1 ? "" : "s"}`}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <Badge
+                              variant={userData.paymentInfo.status === "vencido" ? "destructive" : userData.paymentInfo.status === "por_vencer" ? "outline" : "default"}
+                              className={userData.paymentInfo.status === "por_vencer" ? "border-amber-500 text-amber-600" : ""}
+                            >
+                              {userData.paymentInfo.status === "al_dia"
+                                ? "Al día"
+                                : userData.paymentInfo.status === "por_vencer"
+                                  ? "Por vencer"
+                                  : "Vencido"}
+                            </Badge>
+                            <Badge variant={userData.pagoActivo ? "secondary" : "outline"}>
+                              {userData.pagoActivo ? "Pago activo" : "Pago pausado"}
+                            </Badge>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center space-x-2">
@@ -838,6 +1384,32 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                         </TableCell>
                         <TableCell>
                           <div className="flex space-x-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleMarkAsPaid(userData.id, userData)}
+                              disabled={paymentAction?.userId === userData.id}
+                              title="Marcar como pagado"
+                            >
+                              {paymentAction?.userId === userData.id && paymentAction.type === "mark_paid" ? (
+                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                              ) : (
+                                <Wallet className="h-4 w-4 text-green-500" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleSendPaymentReminder(userData.id, userData)}
+                              disabled={paymentAction?.userId === userData.id}
+                              title="Enviar recordatorio de pago"
+                            >
+                              {paymentAction?.userId === userData.id && paymentAction.type === "reminder" ? (
+                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                              ) : (
+                                <BellRing className="h-4 w-4 text-amber-500" />
+                              )}
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -884,6 +1456,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </div>
