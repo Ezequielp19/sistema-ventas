@@ -126,7 +126,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
     }
 
     if (isMobile) {
-      // En mÃ³vil, usar botones simples en lugar de TabsTrigger
+      // En móvil, usar botones simples en lugar de TabsTrigger
       return (
         <div className="grid grid-cols-2 gap-2">
           <SheetClose asChild>
@@ -199,7 +199,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
               className="w-full justify-start"
               onClick={() => handleTabClick("facturacion")}
             >
-              FacturaciÃ³n
+              Facturación
             </Button>
           </SheetClose>
         </div>
@@ -236,7 +236,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
           <span className="hidden sm:inline">Personalizados</span>
         </TabsTrigger>
         <TabsTrigger value="facturacion">
-          <span className="hidden sm:inline">FacturaciÃ³n</span>
+          <span className="hidden sm:inline">Facturación</span>
           <span className="sm:hidden">F8</span>
         </TabsTrigger>
       </TabsList>
@@ -277,7 +277,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
                   F7 = Reportes
                 </Badge>
                 <Badge variant="outline" className="text-xs">
-                  F8 = FacturaciÃ³n
+                  F8 = Facturación
                 </Badge>
               </div>
               <span className="text-sm text-muted-foreground hidden xl:block">
@@ -286,7 +286,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
               <ThemeToggle />
               <Button variant="outline" onClick={onLogout} size="sm">
                 <LogOut className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Cerrar SesiÃ³n</span>
+                <span className="hidden sm:inline">Cerrar Sesión</span>
               </Button>
             </div>
 
@@ -305,7 +305,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
                 <SheetContent side="right" className="w-80">
                   <div className="space-y-4">
                     <div className="text-center">
-                      <h2 className="text-lg font-semibold">NavegaciÃ³n</h2>
+                      <h2 className="text-lg font-semibold">Navegación</h2>
                       <p className="text-sm text-muted-foreground">{user?.name || user?.email}</p>
                       {empresaInfo && (
                         <div className="mt-2 flex items-center justify-center space-x-2">
@@ -333,14 +333,14 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
       </header>
 
       <main className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 sm:py-8">
-        {/* MigraciÃ³n de datos */}
+        {/* Migración de datos */}
         {showMigration && (
           <div className="mb-6">
             <DataMigration />
           </div>
         )}
 
-        {/* Alertas de Stock Bajo con opciÃ³n de minimizar/maximizar */}
+        {/* Alertas de Stock Bajo con opción de minimizar/maximizar */}
         {stockBajo.length > 0 && (
           <div className="mb-4 sm:mb-6">
             <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950">
@@ -370,13 +370,13 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
                       >
                         <span className="font-medium text-sm">{producto.nombre}</span>
                         <Badge variant="destructive" className="text-xs w-fit">
-                          Stock: {producto.stock} (MÃ­n: {producto.stockMinimo})
+                          Stock: {producto.stock} (Mín: {producto.stockMinimo})
                         </Badge>
                       </div>
                     ))}
                     {stockBajo.length > 3 && (
                       <p className="text-sm text-red-700 dark:text-red-300">
-                        Y {stockBajo.length - 3} productos mÃ¡s...
+                        Y {stockBajo.length - 3} productos más...
                       </p>
                     )}
                   </div>
@@ -386,7 +386,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
           </div>
         )}
 
-        {/* EstadÃ­sticas */}
+        {/* Estadísticas */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -444,12 +444,12 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
                 <SheetTrigger asChild>
                   <Button variant="outline" size="sm">
                     <Menu className="h-4 w-4 mr-2" />
-                    Cambiar SecciÃ³n
+                    Cambiar Sección
                   </Button>
                 </SheetTrigger>
                 <SheetContent side="right" className="w-80">
                   <div className="space-y-4">
-                    <h2 className="text-lg font-semibold">Seleccionar SecciÃ³n</h2>
+                    <h2 className="text-lg font-semibold">Seleccionar Sección</h2>
                     <TabsNavigation isMobile={true} />
                   </div>
                 </SheetContent>

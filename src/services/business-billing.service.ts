@@ -1,5 +1,5 @@
 import { ref, set } from "firebase/database"
-import { doc, getDoc, setDoc } from "firebase/firestore"
+import { collection, doc, getDoc, getDocs, limit, query, setDoc, where } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
 import { sanitizeFirestoreData } from "@/lib/product-sync"
 
@@ -271,6 +271,37 @@ export const loadBusinessBillingRecord = async (
   } catch (error) {
     console.error("Error al cargar datos de pago del negocio:", error)
     return normalizeBillingRecord({ ...fallbackData, businessId }, businessId)
+  }
+}
+
+export const findBusinessBillingRecordsByEmail = async (email: string): Promise<BusinessBillingRecord[]> => {
+  const normalizedEmail = toStringValue(email).toLowerCase()
+
+  if (!normalizedEmail) {
+    return []
+  }
+
+  try {
+    const snapshot = await getDocs(
+      query(
+        collection(firestore, "businesses"),
+        where("email", "==", normalizedEmail),
+        limit(10),
+      ),
+    )
+
+    return snapshot.docs.map((documentSnapshot) =>
+      normalizeBillingRecord(
+        {
+          ...documentSnapshot.data(),
+          businessId: documentSnapshot.id,
+        },
+        documentSnapshot.id,
+      ),
+    )
+  } catch (error) {
+    console.error("Error al buscar negocios por email:", error)
+    return []
   }
 }
 

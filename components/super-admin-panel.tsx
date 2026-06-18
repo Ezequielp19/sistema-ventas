@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useEffect, useRef, type FormEvent } from "react"
 import { ref, get, push, remove } from "firebase/database"
@@ -45,6 +45,7 @@ import { seedDemoDataForBusiness } from "@/src/services/demo-data.service"
 import {
   addMonthsToDateString,
   calculateBillingStatus,
+  findBusinessBillingRecordsByEmail,
   formatBillingDate,
   loadBusinessBillingRecord,
   resolveBillingStatus,
@@ -53,6 +54,7 @@ import {
   type BillingStatus,
   type BusinessBillingRecord,
 } from "@/src/services/business-billing.service"
+import { deleteBusinessClientData } from "@/src/services/business-cleanup.service"
 
 // Configuración de EmailJS
 const EMAILJS_SERVICE_ID = "service_161dv6f"
@@ -115,6 +117,26 @@ type PaymentNotice = {
   message: string
 } | null
 
+type ExistingClientMatch = {
+  businessId: string
+  source: "realtime" | "firestore"
+  nombre: string
+  email: string
+  empresa: string
+  activo: boolean
+  firebaseUid?: string
+  uid?: string
+  password?: string
+  createdAt?: string
+  updatedAt?: string
+  rawRecord: InternalUserRecord
+}
+
+type PendingClientCreation = {
+  formData: UserFormData
+  matches: ExistingClientMatch[]
+}
+
 type ErrorDetails = {
   code: string
   message: string
@@ -140,6 +162,12 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [paymentFilter, setPaymentFilter] = useState<"all" | BillingStatus>("all")
   const [paymentAction, setPaymentAction] = useState<{ userId: string; type: "mark_paid" | "reminder" } | null>(null)
   const [paymentNotice, setPaymentNotice] = useState<PaymentNotice>(null)
+  const [pendingClientCreation, setPendingClientCreation] = useState<PendingClientCreation | null>(null)
+  const [pendingClientDecision, setPendingClientDecision] = useState<"reuse" | "clean" | null>(null)
+  const [showClientConflictDialog, setShowClientConflictDialog] = useState(false)
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<{ id: string; userData: InternalUserRecord } | null>(null)
+  const [permanentDeleteConfirmation, setPermanentDeleteConfirmation] = useState("")
+  const [permanentDeleteLoading, setPermanentDeleteLoading] = useState(false)
   const paymentNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialPaymentStatusRef = useRef<BillingStatus>("al_dia")
 
@@ -556,6 +584,272 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     setSuccess("")
   }
 
+  const closePendingClientCreation = () => {
+    setPendingClientCreation(null)
+    setPendingClientDecision(null)
+    setShowClientConflictDialog(false)
+  }
+
+  const getClientBusinessId = (userData: InternalUserRecord, fallbackId: string) => {
+    return userData.businessId || fallbackId || ""
+  }
+
+  const buildExistingClientMatches = async (normalizedEmail: string, editingUserId: string | null) => {
+    const userMatches = Object.entries(usuarios)
+      .filter(([id, userData]) => {
+        if (editingUserId && id === editingUserId) {
+          return false
+        }
+
+        if (!userData || typeof userData !== "object") {
+          return false
+        }
+
+        const record = userData as InternalUserRecord
+        const emailValue = typeof record.email === "string" ? record.email.trim().toLowerCase() : ""
+
+        return emailValue === normalizedEmail
+      })
+      .map(([id, userData]) => {
+        const record = userData as InternalUserRecord
+        const businessId = getClientBusinessId(record, id)
+
+        return {
+          businessId,
+          source: "realtime" as const,
+          nombre: record.nombre || "",
+          email: record.email || normalizedEmail,
+          empresa: record.empresa || "",
+          activo: record.activo !== false,
+          firebaseUid: record.firebaseUid || record.uid || "",
+          uid: record.uid || "",
+          password: record.password || "",
+          createdAt: record.createdAt || record.fechaCreacion || "",
+          updatedAt: record.updatedAt || record.fechaActualizacion || "",
+          rawRecord: record,
+        }
+      })
+
+    const firestoreMatches = await findBusinessBillingRecordsByEmail(normalizedEmail)
+
+    const mergedMatches = new Map<string, ExistingClientMatch>()
+
+    for (const match of firestoreMatches) {
+      const existingMatch = mergedMatches.get(match.businessId)
+      mergedMatches.set(match.businessId, {
+        businessId: match.businessId,
+        source: existingMatch?.source ?? "firestore",
+        nombre: match.nombre || "",
+        email: match.email || normalizedEmail,
+        empresa: match.empresa || "",
+        activo: match.activo !== false,
+        firebaseUid: match.firebaseUid || match.uid || "",
+        uid: match.uid || "",
+        password: existingMatch?.password || "",
+        createdAt: match.createdAt || "",
+        updatedAt: match.updatedAt || "",
+        rawRecord: {
+          ...existingMatch?.rawRecord,
+          ...match,
+          password: existingMatch?.password || "",
+        },
+      })
+    }
+
+    for (const match of userMatches) {
+      const existingMatch = mergedMatches.get(match.businessId)
+      mergedMatches.set(match.businessId, {
+        ...match,
+        source: "realtime",
+        password: match.password || existingMatch?.password || "",
+        rawRecord: {
+          ...existingMatch?.rawRecord,
+          ...match.rawRecord,
+          password: match.password || existingMatch?.password || "",
+        },
+      })
+    }
+
+    return Array.from(mergedMatches.values())
+  }
+
+  const ensureSecondaryAuthAccount = async (
+    emailAddress: string,
+    password: string,
+    options: { allowExistingAuth: boolean },
+  ) => {
+    try {
+      const authCredential = await createUserWithEmailAndPassword(secondaryAuth, emailAddress, password)
+      return authCredential.user
+    } catch (error) {
+      const { code } = getErrorDetails(error)
+
+      if (code === "auth/email-already-in-use" && options.allowExistingAuth) {
+        return null
+      }
+
+      throw error
+    } finally {
+      try {
+        await signOut(secondaryAuth)
+      } catch (signOutError) {
+        console.error("No se pudo cerrar la sesión secundaria:", signOutError)
+      }
+    }
+  }
+
+  const deleteLegacyAuthAccountIfPossible = async (match: ExistingClientMatch) => {
+    if (!match.email || !match.password) {
+      return false
+    }
+
+    try {
+      const credential = await signInWithEmailAndPassword(secondaryAuth, match.email, match.password)
+      await deleteUser(credential.user)
+      return true
+    } catch (error) {
+      console.error("No se pudo eliminar el usuario de Auth legacy:", error)
+      return false
+    } finally {
+      try {
+        await signOut(secondaryAuth)
+      } catch (signOutError) {
+        console.error("No se pudo cerrar la sesión secundaria:", signOutError)
+      }
+    }
+  }
+
+  const prepareCleanClientAccount = async (matches: ExistingClientMatch[]) => {
+    for (const match of matches) {
+      await deleteLegacyAuthAccountIfPossible(match)
+    }
+
+    for (const match of matches) {
+      await deleteBusinessClientData(match.businessId)
+    }
+  }
+
+  const reuseExistingClientAccount = async (formData: UserFormData, match: ExistingClientMatch) => {
+    await ensureSecondaryAuthAccount(normalizeEmail(formData.email), match.password || formData.password, {
+      allowExistingAuth: true,
+    })
+
+    const firebaseUid = match.firebaseUid || match.uid || match.businessId
+    const userData = buildInternalUserRecord({
+      businessId: match.businessId,
+      firebaseUid,
+      formData: {
+        ...formData,
+        activo: true,
+        password: match.password || formData.password,
+      },
+      previousRecord: match.rawRecord,
+      createdBy: user?.email || "",
+    })
+
+    await saveBusinessBillingRecord(match.businessId, userData, userData)
+  }
+
+  const createFreshClientAccount = async (formData: UserFormData, options: { notify?: boolean } = {}) => {
+    const shouldNotify = options.notify !== false
+    let authCreatedUser: User | null = null
+    let internalUserId = ""
+
+    try {
+      const authCredential = await createUserWithEmailAndPassword(secondaryAuth, normalizeEmail(formData.email), formData.password)
+      authCreatedUser = authCredential.user
+      const firebaseUid = authCredential.user.uid
+      const newUserRef = push(ref(database, "usuarios"))
+      internalUserId = newUserRef.key || ""
+
+      if (!internalUserId) {
+        throw new Error("No se pudo generar el ID interno del usuario")
+      }
+
+      const userData = buildInternalUserRecord({
+        businessId: internalUserId,
+        firebaseUid,
+        formData: {
+          ...formData,
+          nombre: formData.nombre.trim(),
+          email: normalizeEmail(formData.email),
+          password: formData.password,
+          empresa: formData.empresa.trim(),
+          rol: formData.rol || "user",
+          activo: formData.activo,
+        },
+        createdBy: user?.email || "",
+      })
+
+      await saveBusinessBillingRecord(internalUserId, userData, userData)
+
+      const emailSent = await sendWelcomeEmail(normalizeEmail(formData.email), formData.nombre.trim(), formData.password)
+
+      if (shouldNotify) {
+        if (emailSent) {
+          setSuccess("Usuario creado correctamente. Email de bienvenida enviado.")
+          showPaymentNotice("success", `Usuario creado para ${formData.nombre || formData.email}.`)
+        } else {
+          setSuccess("Usuario creado correctamente. Usuario creado, pero no se pudo enviar el email.")
+          showPaymentNotice("success", `Usuario creado para ${formData.nombre || formData.email}.`)
+        }
+      }
+    } catch (createError) {
+      if (authCreatedUser) {
+        try {
+          await deleteUser(authCreatedUser)
+        } catch (rollbackError) {
+          console.error("No se pudo revertir el usuario de Auth:", rollbackError)
+        }
+      }
+
+      throw createError
+    } finally {
+      try {
+        await signOut(secondaryAuth)
+      } catch (signOutError) {
+        console.error("No se pudo cerrar la sesión secundaria:", signOutError)
+      }
+    }
+  }
+
+  const handlePendingClientCreationChoice = async (decision: "reuse" | "clean") => {
+    if (!pendingClientCreation) {
+      return
+    }
+
+    const { formData, matches } = pendingClientCreation
+    const primaryMatch = matches.find((match) => match.source === "realtime" && match.activo === false) ?? matches[0]
+
+    try {
+      setSavingUser(true)
+      setPendingClientDecision(decision)
+
+      if (decision === "reuse") {
+        await reuseExistingClientAccount(formData, primaryMatch)
+        setSuccess("Cliente existente reactivado correctamente")
+        showPaymentNotice("success", `Datos reutilizados para ${formData.nombre || formData.email}.`)
+      } else {
+        await prepareCleanClientAccount(matches)
+        await createFreshClientAccount(formData, { notify: false })
+        setSuccess("Cliente creado como negocio limpio correctamente")
+        showPaymentNotice("success", `Cliente limpio creado para ${formData.nombre || formData.email}.`)
+      }
+
+      setShowUserDialog(false)
+      resetUserForm()
+      closePendingClientCreation()
+      loadData()
+    } catch (error) {
+      console.error("Error al resolver el conflicto de cliente:", error)
+      const { code, message } = getErrorDetails(error)
+      setError(`No se pudo completar la operación: ${code ? `${code}: ${message || "Error desconocido"}` : message || "Error desconocido"}`)
+    } finally {
+      setSavingUser(false)
+      setPendingClientDecision(null)
+    }
+  }
+
   const handleUserSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError("")
@@ -595,33 +889,20 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       setSavingUser(false)
       return
     }
-    
+
     try {
-      try {
-        await ensureSuperAdminFirebaseAuth()
-      } catch (authError) {
-        console.error("Error al autenticar con Firebase:", authError)
-        setError("Error de autenticación del administrador. Revisa las credenciales de Firebase Auth.")
-        return
-      }
+      await ensureSuperAdminFirebaseAuth()
 
-      // Validar que el email no esté duplicado
-      const usuariosArray: Array<{ id: string } & InternalUserRecord> = Object.entries(usuarios)
-        .filter(([, userData]) => typeof userData === "object" && userData !== null)
-        .map(([id, userData]) => ({ id, ...(userData as InternalUserRecord) }))
-
-      const emailExists = usuariosArray.some((u) => {
-        const existingEmail = typeof u.email === "string" ? u.email.trim().toLowerCase() : ""
-        return existingEmail === normalizedEmail && (!editingUser || u.id !== editingUser)
-      })
-
-      if (emailExists) {
-        setError("Este email ya está registrado")
-        setSavingUser(false)
-        return
-      }
+      const matchingClients = await buildExistingClientMatches(normalizedEmail, editingUser)
 
       if (editingUser) {
+        const conflictingClients = matchingClients.filter((client) => client.businessId !== editingUser)
+
+        if (conflictingClients.length > 0) {
+          setError("Ya existen datos previos asociados a este cliente. Usá la edición del registro existente o eliminá el negocio viejo primero.")
+          return
+        }
+
         const previousUser = usuarios[editingUser] || {}
         const userData = buildInternalUserRecord({
           businessId: editingUser,
@@ -645,27 +926,11 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         setShowUserDialog(false)
         resetUserForm()
         loadData()
-        setSavingUser(false)
         return
       }
 
-      let authCreatedUser: User | null = null
-      let internalUserId = ""
-
-      try {
-        const authCredential = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, normalizedPassword)
-        authCreatedUser = authCredential.user
-        const firebaseUid = authCredential.user.uid
-        const newUserRef = push(ref(database, "usuarios"))
-        internalUserId = newUserRef.key || ""
-
-        if (!internalUserId) {
-          throw new Error("No se pudo generar el ID interno del usuario")
-        }
-
-        const userData = buildInternalUserRecord({
-          businessId: internalUserId,
-          firebaseUid,
+      if (matchingClients.length > 0) {
+        setPendingClientCreation({
           formData: {
             ...userFormData,
             nombre: normalizedName,
@@ -675,37 +940,22 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
             rol: userFormData.rol || "user",
             activo: userFormData.activo,
           },
-          createdBy: user?.email || "",
+          matches: matchingClients,
         })
-
-        await saveBusinessBillingRecord(internalUserId, userData, userData)
-
-        const emailSent = await sendWelcomeEmail(normalizedEmail, normalizedName, normalizedPassword)
-
-        if (emailSent) {
-          setSuccess("Usuario creado correctamente. Email de bienvenida enviado.")
-          showPaymentNotice("success", `Usuario creado para ${normalizedName || normalizedEmail}.`)
-        } else {
-          setSuccess("Usuario creado correctamente. Usuario creado, pero no se pudo enviar el email.")
-          showPaymentNotice("success", `Usuario creado para ${normalizedName || normalizedEmail}.`)
-        }
-      } catch (createError) {
-        if (authCreatedUser) {
-          try {
-            await deleteUser(authCreatedUser)
-          } catch (rollbackError) {
-            console.error("No se pudo revertir el usuario de Auth:", rollbackError)
-          }
-        }
-
-        throw createError
-      } finally {
-        try {
-          await signOut(secondaryAuth)
-        } catch (signOutError) {
-          console.error("No se pudo cerrar la sesión secundaria:", signOutError)
-        }
+        setShowClientConflictDialog(true)
+        setShowUserDialog(false)
+        return
       }
+
+      await createFreshClientAccount({
+        ...userFormData,
+        nombre: normalizedName,
+        email: normalizedEmail,
+        password: normalizedPassword,
+        empresa: userFormData.empresa.trim(),
+        rol: userFormData.rol || "user",
+        activo: userFormData.activo,
+      })
 
       setShowUserDialog(false)
       resetUserForm()
@@ -728,7 +978,6 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       setSavingUser(false)
     }
   }
-
   const handleEditUser = (id: string, userData: InternalUserRecord) => {
     setEditingUser(id)
     const formData = buildFormDataForRecord(userData)
@@ -740,31 +989,84 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     setShowUserDialog(true)
   }
 
-  const handleDeleteUser = async (id: string) => {
-    if (confirm("¿Estás seguro de eliminar este usuario?")) {
-      try {
-        await ensureSuperAdminFirebaseAuth()
-        
-        await remove(ref(database, `usuarios/${id}`))
-        setSuccess("Usuario eliminado correctamente")
-        loadData()
-      } catch (error) {
-        console.error("Error al eliminar usuario:", error)
-        const errorDetails = getErrorDetails(error)
-        if (errorDetails.code === "PERMISSION_DENIED") {
-          setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
-        } else {
-          setError("Error al eliminar el usuario")
-        }
+  const handleOpenPermanentDeleteDialog = (id: string, userData: InternalUserRecord) => {
+    setPermanentDeleteTarget({ id, userData })
+    setPermanentDeleteConfirmation("")
+  }
+
+  const handleConfirmPermanentDelete = async () => {
+    if (!permanentDeleteTarget || permanentDeleteConfirmation.trim().toUpperCase() !== "ELIMINAR") {
+      setError("Escribí ELIMINAR para confirmar el borrado definitivo")
+      return
+    }
+
+    const { id, userData } = permanentDeleteTarget
+    const businessId = getClientBusinessId(userData, id)
+    let authRemovalWarning = ""
+
+    try {
+      setPermanentDeleteLoading(true)
+      await ensureSuperAdminFirebaseAuth()
+
+      const authMatch: ExistingClientMatch = {
+        businessId,
+        source: "realtime",
+        nombre: userData.nombre || "",
+        email: userData.email || "",
+        empresa: userData.empresa || "",
+        activo: userData.activo !== false,
+        firebaseUid: userData.firebaseUid || userData.uid || "",
+        uid: userData.uid || "",
+        password: userData.password || "",
+        createdAt: userData.createdAt || userData.fechaCreacion || "",
+        updatedAt: userData.updatedAt || userData.fechaActualizacion || "",
+        rawRecord: userData,
       }
+
+      const authDeleted = await deleteLegacyAuthAccountIfPossible(authMatch)
+      if (!authDeleted && authMatch.email) {
+        authRemovalWarning = "No se pudo borrar el usuario de Firebase Auth."
+      }
+
+      await deleteBusinessClientData(businessId)
+
+      if (id !== businessId) {
+        await Promise.all([
+          remove(ref(database, `usuarios/${id}`)),
+          remove(ref(database, `tiendas/${id}`)),
+        ])
+      }
+
+      if (authRemovalWarning) {
+        setError("")
+        setSuccess(`Cliente eliminado definitivamente. ${authRemovalWarning}`)
+      } else {
+        setError("")
+        setSuccess("Cliente eliminado definitivamente")
+      }
+
+      showPaymentNotice("success", `Cliente eliminado definitivamente para ${userData.nombre || userData.email || businessId}.`)
+      setPermanentDeleteTarget(null)
+      setPermanentDeleteConfirmation("")
+      loadData()
+    } catch (error) {
+      console.error("Error al eliminar cliente definitivamente:", error)
+      const errorDetails = getErrorDetails(error)
+      if (errorDetails.code === "PERMISSION_DENIED") {
+        setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
+      } else {
+        setError(`Error al eliminar el cliente: ${errorDetails.code ? `${errorDetails.code}: ${errorDetails.message || "Error desconocido"}` : errorDetails.message || "Error desconocido"}`)
+      }
+    } finally {
+      setPermanentDeleteLoading(false)
     }
   }
 
   const handleToggleUserStatus = async (id: string, userData: InternalUserRecord) => {
     const newStatus = !userData.activo
-    const statusText = newStatus ? "activado" : "desactivado"
+    const statusText = newStatus ? "reactivado" : "suspendido"
     
-    if (confirm(`¿Estás seguro de ${newStatus ? "activar" : "desactivar"} este usuario?`)) {
+    if (confirm(`¿Estás seguro de ${newStatus ? "reactivar" : "suspender"} este cliente?`)) {
       try {
         await ensureSuperAdminFirebaseAuth()
         
@@ -774,7 +1076,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         }
 
         await saveBusinessBillingRecord(id, updatedUserRecord, updatedUserRecord)
-        setSuccess(`Usuario ${statusText} correctamente`)
+        setSuccess(`Cliente ${statusText} correctamente`)
         loadData()
       } catch (error) {
         console.error("Error al cambiar estado del usuario:", error)
@@ -928,6 +1230,11 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   }
 
   const copyPassword = async (password: string) => {
+    if (!password) {
+      setError("No hay contraseña disponible para copiar")
+      return
+    }
+
     try {
       await navigator.clipboard.writeText(password)
       setCopiedPassword(password)
@@ -1021,7 +1328,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-muted-foreground">Usuarios Inactivos</p>
+                    <p className="text-sm font-medium text-muted-foreground">Clientes Suspendidos</p>
                     <p className="text-2xl font-bold text-red-600">{usuariosInactivos.length}</p>
                   </div>
                   <UserX className="h-8 w-8 text-red-500" />
@@ -1275,6 +1582,128 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                 </form>
               </DialogContent>
             </Dialog>
+            <Dialog
+              open={showClientConflictDialog && Boolean(pendingClientCreation)}
+              onOpenChange={(open) => {
+                if (!open) {
+                  closePendingClientCreation()
+                  setShowUserDialog(true)
+                }
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Ya existen datos previos asociados a este cliente</DialogTitle>
+                </DialogHeader>
+                {pendingClientCreation && (
+                  <div className="space-y-4">
+                    <Alert>
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        Se encontraron registros previos para <strong>{pendingClientCreation.formData.email}</strong>.
+                        Podés reactivar ese negocio o crear uno limpio.
+                      </AlertDescription>
+                    </Alert>
+                    <div className="rounded-lg border border-border/60 p-4 text-sm text-muted-foreground space-y-1">
+                      <p><strong>Nombre:</strong> {pendingClientCreation.formData.nombre}</p>
+                      <p><strong>Coincidencias:</strong> {pendingClientCreation.matches.length}</p>
+                      <p>
+                        <strong>Estado detectado:</strong>{" "}
+                        {pendingClientCreation.matches[0]?.activo ? "Activo" : "Suspendido / histórico"}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          closePendingClientCreation()
+                          setShowUserDialog(true)
+                        }}
+                        disabled={pendingClientDecision !== null}
+                      >
+                        Volver
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => handlePendingClientCreationChoice("reuse")}
+                        disabled={pendingClientDecision !== null}
+                      >
+                        {pendingClientDecision === "reuse" ? "Procesando..." : "Reactivar cliente existente"}
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => handlePendingClientCreationChoice("clean")}
+                        disabled={pendingClientDecision !== null}
+                      >
+                        {pendingClientDecision === "clean" ? "Procesando..." : "Crear cliente limpio"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+            <Dialog
+              open={Boolean(permanentDeleteTarget)}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setPermanentDeleteTarget(null)
+                  setPermanentDeleteConfirmation("")
+                }
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Eliminar cliente definitivamente</DialogTitle>
+                </DialogHeader>
+                {permanentDeleteTarget && (
+                  <div className="space-y-4">
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        Esta acción borra productos, ventas, proveedores, configuración de tienda, espejos legacy y el negocio asociado. Es irreversible.
+                      </AlertDescription>
+                    </Alert>
+                    <div className="rounded-lg border border-border/60 p-4 text-sm text-muted-foreground space-y-1">
+                      <p><strong>Cliente:</strong> {permanentDeleteTarget.userData.nombre || permanentDeleteTarget.userData.empresa || permanentDeleteTarget.userData.email}</p>
+                      <p><strong>Email:</strong> {permanentDeleteTarget.userData.email || "Sin email"}</p>
+                      <p><strong>Negocio:</strong> {getClientBusinessId(permanentDeleteTarget.userData, permanentDeleteTarget.id)}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="delete-confirmation">Escribí ELIMINAR para confirmar</Label>
+                      <Input
+                        id="delete-confirmation"
+                        value={permanentDeleteConfirmation}
+                        onChange={(e) => setPermanentDeleteConfirmation(e.target.value)}
+                        placeholder="ELIMINAR"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setPermanentDeleteTarget(null)
+                          setPermanentDeleteConfirmation("")
+                        }}
+                        disabled={permanentDeleteLoading}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        onClick={handleConfirmPermanentDelete}
+                        disabled={permanentDeleteLoading || permanentDeleteConfirmation.trim().toUpperCase() !== "ELIMINAR"}
+                      >
+                        {permanentDeleteLoading ? "Eliminando..." : "Eliminar definitivamente"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -1313,7 +1742,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                     <TableHead>Próx. pago</TableHead>
                     <TableHead>Días</TableHead>
                     <TableHead>Pago</TableHead>
-                    <TableHead>Contraseña</TableHead>
+                    <TableHead>Acceso</TableHead>
                     <TableHead>Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1337,7 +1766,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                         </TableCell>
                         <TableCell>
                           <Badge variant={userData.activo ? "default" : "destructive"}>
-                            {userData.activo ? "Activo" : "Inactivo"}
+                            {userData.activo ? "Activo" : "Suspendido"}
                           </Badge>
                         </TableCell>
                         <TableCell>{userData.plan || "mensual"}</TableCell>
@@ -1367,19 +1796,24 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-mono text-sm">••••••••</span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => copyPassword(userData.password || "")}
-                            >
-                              {copiedPassword === userData.password ? (
-                                <CheckCircle className="h-4 w-4 text-green-500" />
-                              ) : (
-                                <Copy className="h-4 w-4" />
-                              )}
-                            </Button>
+                          <div className="flex flex-col gap-2">
+                            {userData.password ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="justify-start gap-2"
+                                onClick={() => copyPassword(userData.password || "")}
+                              >
+                                {copiedPassword === userData.password ? (
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                ) : (
+                                  <Copy className="h-4 w-4" />
+                                )}
+                                {copiedPassword === userData.password ? "Copiado" : "Copiar"}
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No disponible</span>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -1421,7 +1855,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                               variant="ghost"
                               size="sm"
                               onClick={() => handleToggleUserStatus(userData.id, userData)}
-                              title={userData.activo ? "Desactivar usuario" : "Activar usuario"}
+                              title={userData.activo ? "Suspender cliente" : "Reactivar cliente"}
                             >
                               {userData.activo ? (
                                 <UserX className="h-4 w-4 text-red-500" />
@@ -1445,7 +1879,8 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleDeleteUser(userData.id)}
+                              onClick={() => handleOpenPermanentDeleteDialog(userData.id, userData)}
+                              title="Eliminar definitivamente"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -1464,3 +1899,4 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     </div>
   )
 } 
+

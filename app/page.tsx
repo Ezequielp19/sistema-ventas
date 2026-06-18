@@ -1,9 +1,9 @@
-"use client"
+﻿"use client"
 
 import { useState } from "react"
 import { ref, get } from "firebase/database"
 import { database, auth } from "@/lib/firebase"
-import { signInAnonymously, signInWithEmailAndPassword } from "firebase/auth"
+import { signInWithEmailAndPassword } from "firebase/auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -23,6 +23,9 @@ type LegacyUserRecord = {
   empresa?: string
 }
 
+const SUPER_ADMIN_EMAIL = "adminatenea@software.com"
+const SUPER_ADMIN_PASSWORD = "adminatenea"
+
 export default function Home() {
   const { user, isLoggedIn, isSuperAdmin, isLoading, login, logout } = useAuth()
   const [email, setEmail] = useState("")
@@ -36,29 +39,28 @@ export default function Home() {
     setError("")
 
     try {
-      // Verificar si es super admin
-      if (email.toLowerCase() === "adminatenea@software.com" && password === "adminatenea") {
-        // Intentar autenticar con Firebase Auth para permitir escritura en la base de datos
-        try {
-          // Intentar autenticar con email/password primero
-          try {
-            await signInWithEmailAndPassword(auth, email, password)
-          } catch (authError) {
-            // Si falla, usar autenticación anónima como fallback
-            // Esto permite que el super admin tenga permisos de escritura
-            await signInAnonymously(auth)
-          }
-        } catch (firebaseAuthError) {
-          console.warn("No se pudo autenticar con Firebase Auth, continuando con autenticación local:", firebaseAuthError)
-          // Continuar aunque falle la autenticación de Firebase Auth
-        }
+      const normalizedEmail = email.trim().toLowerCase()
+      const normalizedPassword = password.trim()
+      const expectedSuperAdminEmail = SUPER_ADMIN_EMAIL.toLowerCase()
+      const isSuperAdminLogin = normalizedEmail === expectedSuperAdminEmail && normalizedPassword === SUPER_ADMIN_PASSWORD
 
+      console.log("Intentando login super admin:", isSuperAdminLogin)
+      console.log("DEBUG SUPER ADMIN:", {
+        inputEmail: normalizedEmail,
+        expectedEmail: expectedSuperAdminEmail,
+        emailMatches: normalizedEmail === expectedSuperAdminEmail,
+        passwordLength: normalizedPassword.length,
+        expectedPasswordLength: SUPER_ADMIN_PASSWORD.length,
+        passwordMatches: normalizedPassword === SUPER_ADMIN_PASSWORD,
+      })
+
+      if (isSuperAdminLogin) {
         const adminUser = {
           id: "admin",
-          uid: "admin", // Para compatibilidad
-          email: "adminatenea@software.com",
+          uid: "admin",
+          email: SUPER_ADMIN_EMAIL,
           role: "super_admin",
-          name: "Super Administrador"
+          name: "Super Administrador",
         }
         login(adminUser, true)
         void trackEvent(ANALYTICS_EVENTS.loginSuccess, { role: "super_admin" })
@@ -67,26 +69,24 @@ export default function Home() {
         return
       }
 
-      // Verificar usuarios normales
       const usersRef = ref(database, "usuarios")
       const snapshot = await get(usersRef)
       const users = (snapshot.val() || {}) as Record<string, LegacyUserRecord>
 
-      const user = Object.entries(users).find(([id, userData]) => 
-        (userData.email || "").toLowerCase() === email.toLowerCase() && userData.password === password
+      const user = Object.entries(users).find(([, userData]) =>
+        (userData.email || "").trim().toLowerCase() === normalizedEmail && userData.password === normalizedPassword,
       )
 
       if (user) {
         const [userId, userData] = user
-        
-        // Verificar si el usuario está activo
+
         if (userData.activo === false) {
-          setError("Tu cuenta ha sido desactivada. Contacta al administrador.")
+          setError("Tu cuenta está suspendida. Contacta al administrador.")
           return
         }
 
         try {
-          await signInWithEmailAndPassword(auth, email, password)
+          await signInWithEmailAndPassword(auth, normalizedEmail, normalizedPassword)
         } catch (authError) {
           console.error("Error al autenticar al usuario común con Firebase Auth:", authError)
           setError("Tu usuario existe, pero no pudo iniciar sesión en Firebase Auth. Verifica que esté creado también en Authentication.")
@@ -95,11 +95,11 @@ export default function Home() {
 
         const normalUser = {
           id: userId,
-          uid: userId, // Para compatibilidad
-          email: userData.email || email,
+          uid: userId,
+          email: userData.email || normalizedEmail,
           role: "user",
-          name: userData.nombre || userData.email || email,
-          empresa: userData.empresa || "Cliente"
+          name: userData.nombre || userData.email || normalizedEmail,
+          empresa: userData.empresa || "Cliente",
         }
         login(normalUser, false)
         void trackEvent(ANALYTICS_EVENTS.loginSuccess, { role: "user" })
@@ -115,8 +115,6 @@ export default function Home() {
       setIsLoadingLogin(false)
     }
   }
-
-
 
   // Mostrar pantalla de carga mientras se inicializa
   if (isLoading) {
