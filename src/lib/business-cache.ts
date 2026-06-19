@@ -1,4 +1,4 @@
-export type BusinessCacheScope = "products" | "providers" | "sales" | "dashboard" | "store" | "public-store" | "reports"
+export type BusinessCacheScope = "products" | "providers" | "sales" | "dashboard" | "store" | "public-store" | "reports" | "billing"
 
 type CacheEntry<T> = {
   value: T

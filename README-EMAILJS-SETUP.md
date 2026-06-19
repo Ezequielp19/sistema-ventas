@@ -7,6 +7,7 @@
 - Template ID recordatorio de pago: `template_fheag2h`
 - Public Key: `QLg98FNv2a5z4ZK77`
 - Correo de contacto: `gestionproinfo@gmail.com`
+- URL de acceso: `https://app.gestionpro.pro/`
 
 ## Template de creación de cuenta
 
@@ -17,6 +18,11 @@ Variables esperadas:
 - `{{user_email}}`
 - `{{user_password}}`
 - `{{login_url}}`
+- `{{app_url}}`
+- `{{website_url}}`
+- `{{frontend_url}}`
+- `{{public_url}}`
+- `{{redirect_url}}`
 - `{{app_name}}`
 - `{{email}}`
 - `{{reply_to}}`
@@ -36,6 +42,11 @@ Variables esperadas:
 - `{{payment_status}}`
 - `{{payment_notes}}`
 - `{{login_url}}`
+- `{{app_url}}`
+- `{{website_url}}`
+- `{{frontend_url}}`
+- `{{public_url}}`
+- `{{redirect_url}}`
 - `{{app_name}}`
 - `{{email}}`
 - `{{reply_to}}`
@@ -46,3 +57,4 @@ Variables esperadas:
 - No usar Private Key en frontend.
 - El envío debe usar siempre la Public Key.
 - El recordatorio de pago no debe incluir contraseña.
+- El enlace oficial de acceso del sistema es `https://app.gestionpro.pro/`.

@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useState, useEffect, useRef, type FormEvent } from "react"
+import { useState, useEffect, useMemo, useRef, type FormEvent } from "react"
 import { ref, get, push, remove } from "firebase/database"
 import { initializeApp, getApps } from "firebase/app"
 import {
@@ -23,6 +23,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Pagination } from "@/components/ui/pagination"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { 
   Plus, 
   Edit, 
@@ -39,6 +48,13 @@ import {
   BellRing,
   BadgeDollarSign,
   Wallet,
+  Search,
+  SlidersHorizontal,
+  MoreHorizontal,
+  Building2,
+  CalendarClock,
+  Mail,
+  RefreshCw,
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { deleteDemoDataForBusiness, seedDemoDataForBusiness } from "@/src/services/demo-data.service"
@@ -63,7 +79,7 @@ const ACCOUNT_CREATION_TEMPLATE_ID = "template_njhbffj"
 const PAYMENT_REMINDER_TEMPLATE_ID = "template_fheag2h"
 const GESTIONPRO_CONTACT_EMAIL = "gestionproinfo@gmail.com"
 
-const APP_URL = "https://sistema-ventas-lilac.vercel.app/"
+const APP_URL = "https://app.gestionpro.pro/"
 const SUPER_ADMIN_EMAIL = "adminatenea@software.com"
 const SUPER_ADMIN_PASSWORD = "adminatenea"
 const SECONDARY_AUTH_APP_NAME = "SecondaryAuthApp"
@@ -99,6 +115,9 @@ type InternalUserRecord = Partial<BusinessBillingRecord> & {
   email?: string
   password?: string
   empresa?: string
+  businessName?: string
+  nombreEmpresa?: string
+  comercio?: string
   rol?: string
   role?: string
   activo?: boolean
@@ -144,6 +163,17 @@ type ErrorDetails = {
   text?: string
 }
 
+type PaymentInfoCell = {
+  status: BillingStatus
+  dueDate: string
+  diasRestantes: number | null
+}
+
+type ClientListItem = InternalUserRecord & {
+  id: string
+  paymentInfo: PaymentInfoCell
+}
+
 const secondaryApp =
   getApps().find((app) => app.name === SECONDARY_AUTH_APP_NAME) ??
   initializeApp(firebaseConfig, SECONDARY_AUTH_APP_NAME)
@@ -154,6 +184,11 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [showUserDialog, setShowUserDialog] = useState(false)
   const [editingUser, setEditingUser] = useState<string | null>(null)
   const [copiedPassword, setCopiedPassword] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [sortBy, setSortBy] = useState<"due" | "recent" | "name" | "mrr">("due")
+  const [itemsPerPage, setItemsPerPage] = useState("10")
+  const [currentPage, setCurrentPage] = useState(1)
+  const [loadingUsers, setLoadingUsers] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [sendingEmail, setSendingEmail] = useState(false)
@@ -165,6 +200,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [pendingClientCreation, setPendingClientCreation] = useState<PendingClientCreation | null>(null)
   const [pendingClientDecision, setPendingClientDecision] = useState<"reuse" | "clean" | null>(null)
   const [showClientConflictDialog, setShowClientConflictDialog] = useState(false)
+  const [selectedClientTarget, setSelectedClientTarget] = useState<ClientListItem | null>(null)
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<{ id: string; userData: InternalUserRecord } | null>(null)
   const [permanentDeleteConfirmation, setPermanentDeleteConfirmation] = useState("")
   const [permanentDeleteLoading, setPermanentDeleteLoading] = useState(false)
@@ -173,6 +209,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [demoDeleteLoading, setDemoDeleteLoading] = useState(false)
   const paymentNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialPaymentStatusRef = useRef<BillingStatus>("al_dia")
+  const usersCacheRef = useRef<{ loadedAt: number; data: Record<string, InternalUserRecord> } | null>(null)
 
   const [userFormData, setUserFormData] = useState<UserFormData>({
     nombre: "",
@@ -193,6 +230,12 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   })
 
   const normalizeEmail = (value: string) => value.trim().toLowerCase()
+
+  const normalizeSearchText = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
 
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
 
@@ -347,7 +390,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
   const getPaymentStatusCell = (
     userData: InternalUserRecord,
-  ): { status: BillingStatus; dueDate: string; diasRestantes: number | null } => {
+  ): PaymentInfoCell => {
     const resolvedStatus = resolveBillingStatus(userData)
     const dueDate = formatBillingDate(userData.proximoPago)
     const daysRemaining = resolvedStatus.diasRestantes
@@ -436,8 +479,61 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     }
   }, [])
 
-  const loadData = async () => {
+  const syncUsersCache = (nextUsers: Record<string, InternalUserRecord>) => {
+    usersCacheRef.current = {
+      loadedAt: Date.now(),
+      data: nextUsers,
+    }
+  }
+
+  const patchCachedUser = (id: string, patch: Partial<InternalUserRecord>) => {
+    setUsuarios((currentUsers) => {
+      const nextUsers = {
+        ...currentUsers,
+        [id]: {
+          ...(currentUsers[id] || {}),
+          ...patch,
+        },
+      }
+      syncUsersCache(nextUsers)
+      return nextUsers
+    })
+    setSelectedClientTarget((currentTarget) =>
+      currentTarget && currentTarget.id === id
+        ? {
+            ...currentTarget,
+            ...patch,
+            paymentInfo: getPaymentStatusCell({
+              ...currentTarget,
+              ...patch,
+            }),
+          }
+        : currentTarget,
+    )
+  }
+
+  const removeCachedUser = (id: string) => {
+    setUsuarios((currentUsers) => {
+      if (!currentUsers[id]) {
+        return currentUsers
+      }
+
+      const nextUsers = { ...currentUsers }
+      delete nextUsers[id]
+      syncUsersCache(nextUsers)
+      return nextUsers
+    })
+    setSelectedClientTarget((currentTarget) => (currentTarget && currentTarget.id === id ? null : currentTarget))
+  }
+
+  const loadData = async (options: { force?: boolean } = {}) => {
+    if (!options.force && usersCacheRef.current?.data) {
+      setUsuarios(usersCacheRef.current.data)
+      return
+    }
+
     try {
+      setLoadingUsers(true)
       await ensureSuperAdminFirebaseAuth()
       
       const usuariosSnapshot = await get(ref(database, "usuarios"))
@@ -462,7 +558,9 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         }),
       )
 
-      setUsuarios(Object.fromEntries(usuariosEntries))
+      const nextUsers = Object.fromEntries(usuariosEntries)
+      syncUsersCache(nextUsers)
+      setUsuarios(nextUsers)
       setError("") // Limpiar errores si la carga es exitosa
     } catch (error) {
       console.error("Error al cargar datos:", error)
@@ -472,6 +570,8 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       } else {
         setError(`Error al cargar los usuarios: ${loadError.message || "Error desconocido"}`)
       }
+    } finally {
+      setLoadingUsers(false)
     }
   }
 
@@ -500,6 +600,11 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         user_email: userEmail,
         user_password: userPassword,
         login_url: APP_URL,
+        app_url: APP_URL,
+        website_url: APP_URL,
+        frontend_url: APP_URL,
+        public_url: APP_URL,
+        redirect_url: APP_URL,
         app_name: "GestiónPro",
         title: "Bienvenido a GestiónPro",
         email: GESTIONPRO_CONTACT_EMAIL,
@@ -557,6 +662,11 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
           `Hola ${userData.nombre || userData.empresa || "Cliente"}, te recordamos que tu servicio GestiónPro vence el día ${formatBillingDate(userData.proximoPago) || userData.proximoPago || "próximamente"}. ` +
           "Para mantener activo tu acceso, podés abonar el período correspondiente.",
         login_url: APP_URL,
+        app_url: APP_URL,
+        website_url: APP_URL,
+        frontend_url: APP_URL,
+        public_url: APP_URL,
+        redirect_url: APP_URL,
       }
 
       await emailjs.send(
@@ -595,6 +705,25 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
   const getClientBusinessId = (userData: InternalUserRecord, fallbackId: string) => {
     return userData.businessId || fallbackId || ""
+  }
+
+  const getBusinessDisplayName = (userData: InternalUserRecord, fallbackId: string) => {
+    return (
+      userData.empresa?.trim() ||
+      userData.businessName?.trim() ||
+      userData.comercio?.trim() ||
+      userData.nombre?.trim() ||
+      fallbackId ||
+      "Sin negocio"
+    )
+  }
+
+  const openClientDetail = (clientData: ClientListItem) => {
+    setSelectedClientTarget(clientData)
+  }
+
+  const closeClientDetail = () => {
+    setSelectedClientTarget(null)
   }
 
   const buildExistingClientMatches = async (normalizedEmail: string, editingUserId: string | null) => {
@@ -751,6 +880,11 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     })
 
     await saveBusinessBillingRecord(match.businessId, userData, userData)
+
+    return {
+      businessId: match.businessId,
+      record: userData,
+    }
   }
 
   const createFreshClientAccount = async (formData: UserFormData, options: { notify?: boolean } = {}) => {
@@ -797,6 +931,11 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
           showPaymentNotice("success", `Usuario creado para ${formData.nombre || formData.email}.`)
         }
       }
+
+      return {
+        businessId: internalUserId,
+        record: userData,
+      }
     } catch (createError) {
       if (authCreatedUser) {
         try {
@@ -829,12 +968,18 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       setPendingClientDecision(decision)
 
       if (decision === "reuse") {
-        await reuseExistingClientAccount(formData, primaryMatch)
+        const updatedClient = await reuseExistingClientAccount(formData, primaryMatch)
+        if (updatedClient) {
+          patchCachedUser(updatedClient.businessId, updatedClient.record)
+        }
         setSuccess("Cliente existente reactivado correctamente")
         showPaymentNotice("success", `Datos reutilizados para ${formData.nombre || formData.email}.`)
       } else {
         await prepareCleanClientAccount(matches)
-        await createFreshClientAccount(formData, { notify: false })
+        const createdClient = await createFreshClientAccount(formData, { notify: false })
+        if (createdClient) {
+          patchCachedUser(createdClient.businessId, createdClient.record)
+        }
         setSuccess("Cliente creado como negocio limpio correctamente")
         showPaymentNotice("success", `Cliente limpio creado para ${formData.nombre || formData.email}.`)
       }
@@ -924,6 +1069,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         })
 
         await saveBusinessBillingRecord(editingUser, userData, userData)
+        patchCachedUser(editingUser, userData)
         setSuccess("Usuario actualizado correctamente")
         showPaymentNotice("success", `Datos actualizados para ${normalizedName || normalizedEmail}.`)
         setShowUserDialog(false)
@@ -950,7 +1096,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         return
       }
 
-      await createFreshClientAccount({
+      const createdClient = await createFreshClientAccount({
         ...userFormData,
         nombre: normalizedName,
         email: normalizedEmail,
@@ -959,6 +1105,10 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         rol: userFormData.rol || "user",
         activo: userFormData.activo,
       })
+
+      if (createdClient) {
+        patchCachedUser(createdClient.businessId, createdClient.record)
+      }
 
       setShowUserDialog(false)
       resetUserForm()
@@ -1051,6 +1201,10 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       showPaymentNotice("success", `Cliente eliminado definitivamente para ${userData.nombre || userData.email || businessId}.`)
       setPermanentDeleteTarget(null)
       setPermanentDeleteConfirmation("")
+      removeCachedUser(id)
+      if (id !== businessId) {
+        removeCachedUser(businessId)
+      }
       loadData()
     } catch (error) {
       console.error("Error al eliminar cliente definitivamente:", error)
@@ -1079,6 +1233,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         }
 
         await saveBusinessBillingRecord(id, updatedUserRecord, updatedUserRecord)
+        patchCachedUser(id, updatedUserRecord)
         setSuccess(`Cliente ${statusText} correctamente`)
         loadData()
       } catch (error) {
@@ -1113,13 +1268,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
       }
 
       await saveBusinessBillingRecord(id, updatedUserRecord, updatedUserRecord)
-      setUsuarios((currentUsers) => ({
-        ...currentUsers,
-        [id]: {
-          ...currentUsers[id],
-          ...updatedUserRecord,
-        },
-      }))
+      patchCachedUser(id, updatedUserRecord)
       setSuccess("Pago marcado como registrado")
       showPaymentNotice("success", `Pago actualizado para ${userData.nombre || userData.empresa || userData.email || "el cliente"}.`)
     } catch (error) {
@@ -1161,13 +1310,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
       try {
         await saveBusinessBillingRecord(id, updatedUserRecord, updatedUserRecord)
-        setUsuarios((currentUsers) => ({
-          ...currentUsers,
-          [id]: {
-            ...currentUsers[id],
-            ...updatedUserRecord,
-          },
-        }))
+        patchCachedUser(id, updatedUserRecord)
         setSuccess("Recordatorio enviado correctamente")
         showPaymentNotice("success", `Recordatorio enviado a ${userData.email || userData.nombre || "el cliente"}.`)
       } catch (saveError) {
@@ -1315,28 +1458,512 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     }
   }
 
-  const usuariosArray: Array<{ id: string } & InternalUserRecord> = Object.entries(usuarios).map(([id, userData]) => ({
-    id,
-    ...(userData as InternalUserRecord),
-  }))
+  const resendAccessEmail = async (userData: InternalUserRecord) => {
+    if (!userData.email || !userData.password) {
+      setError("No hay datos de acceso completos para reenviar")
+      return
+    }
 
-  const usuariosConPagos = usuariosArray.map((userData) => ({
-    ...userData,
-    paymentInfo: getPaymentStatusCell(userData),
-  }))
+    const emailSent = await sendWelcomeEmail(
+      userData.email,
+      userData.nombre || userData.empresa || userData.email,
+      userData.password,
+    )
 
-  const usuariosFiltrados = paymentFilter === "all"
-    ? usuariosConPagos
-    : usuariosConPagos.filter((userData) => userData.paymentInfo.status === paymentFilter)
+    if (emailSent) {
+      showPaymentNotice("success", `Acceso reenviado a ${userData.email}.`)
+    } else {
+      showPaymentNotice("error", `No se pudo reenviar el acceso a ${userData.email}.`)
+    }
+  }
 
-  const usuariosActivos = usuariosArray.filter(user => user.activo !== false)
-  const usuariosInactivos = usuariosArray.filter(user => user.activo === false)
-  const paymentStatusCounts = usuariosConPagos.reduce<Record<"al_dia" | "por_vencer" | "vencido", number>>(
-    (accumulator, userData) => {
-      accumulator[userData.paymentInfo.status] += 1
-      return accumulator
-    },
-    { al_dia: 0, por_vencer: 0, vencido: 0 },
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, paymentFilter, sortBy, itemsPerPage])
+
+  const usuariosArray = useMemo<Array<{ id: string } & InternalUserRecord>>(
+    () =>
+      Object.entries(usuarios).map(([id, userData]) => ({
+        id,
+        ...(userData as InternalUserRecord),
+      })),
+    [usuarios],
+  )
+
+  const usuariosConPagos = useMemo<ClientListItem[]>(
+    () =>
+      usuariosArray.map((userData) => ({
+        ...userData,
+        paymentInfo: getPaymentStatusCell(userData),
+      })),
+    [usuariosArray],
+  )
+
+  const usuariosActivos = useMemo(
+    () => usuariosArray.filter((user) => user.activo !== false),
+    [usuariosArray],
+  )
+  const usuariosInactivos = useMemo(
+    () => usuariosArray.filter((user) => user.activo === false),
+    [usuariosArray],
+  )
+  const paymentStatusCounts = useMemo<Record<"al_dia" | "por_vencer" | "vencido", number>>(
+    () =>
+      usuariosConPagos.reduce(
+        (accumulator, userData) => {
+          accumulator[userData.paymentInfo.status] += 1
+          return accumulator
+        },
+        { al_dia: 0, por_vencer: 0, vencido: 0 },
+      ),
+    [usuariosConPagos],
+  )
+  const totalMonthlyRevenue = useMemo(
+    () => usuariosActivos.reduce((accumulator, userData) => accumulator + Number(userData.precioMensual ?? 0), 0),
+    [usuariosActivos],
+  )
+  const atRiskRevenue = useMemo(
+    () =>
+      usuariosConPagos
+        .filter((userData) => userData.paymentInfo.status !== "al_dia")
+        .reduce((accumulator, userData) => accumulator + Number(userData.precioMensual ?? 0), 0),
+    [usuariosConPagos],
+  )
+
+  const usuariosFiltradosBase = useMemo(
+    () =>
+      paymentFilter === "all"
+        ? usuariosConPagos
+        : usuariosConPagos.filter((userData) => userData.paymentInfo.status === paymentFilter),
+    [paymentFilter, usuariosConPagos],
+  )
+
+  const usuariosBuscados = useMemo(
+    () =>
+      usuariosFiltradosBase.filter((userData) => {
+        if (!searchTerm.trim()) {
+          return true
+        }
+
+        const searchValue = normalizeSearchText(searchTerm)
+        const searchableContent = [
+          userData.nombre,
+          userData.email,
+          userData.empresa,
+          userData.businessId,
+          userData.uid,
+          userData.firebaseUid,
+          userData.plan,
+          userData.rol,
+          userData.role,
+          userData.paymentNotes,
+        ]
+          .filter(Boolean)
+          .join(" ")
+
+        return normalizeSearchText(searchableContent).includes(searchValue)
+      }),
+    [searchTerm, usuariosFiltradosBase],
+  )
+
+  const usuariosOrdenados = useMemo(
+    () =>
+      [...usuariosBuscados].sort((left, right) => {
+        const getStatusPriority = (status: BillingStatus) => {
+          switch (status) {
+            case "vencido":
+              return 0
+            case "por_vencer":
+              return 1
+            default:
+              return 2
+          }
+        }
+
+        if (sortBy === "recent") {
+          const leftDate = new Date(left.createdAt || left.fechaCreacion || left.updatedAt || 0).getTime() || 0
+          const rightDate = new Date(right.createdAt || right.fechaCreacion || right.updatedAt || 0).getTime() || 0
+          return rightDate - leftDate
+        }
+
+        if (sortBy === "name") {
+          return (left.nombre || left.empresa || left.email || "").localeCompare(right.nombre || right.empresa || right.email || "", "es")
+        }
+
+        if (sortBy === "mrr") {
+          const leftValue = Number(left.precioMensual ?? 0)
+          const rightValue = Number(right.precioMensual ?? 0)
+          return rightValue - leftValue
+        }
+
+        const statusDiff = getStatusPriority(left.paymentInfo.status) - getStatusPriority(right.paymentInfo.status)
+        if (statusDiff !== 0) {
+          return statusDiff
+        }
+
+        const daysLeftLeft = left.paymentInfo.diasRestantes ?? Number.POSITIVE_INFINITY
+        const daysLeftRight = right.paymentInfo.diasRestantes ?? Number.POSITIVE_INFINITY
+        if (daysLeftLeft !== daysLeftRight) {
+          return daysLeftLeft - daysLeftRight
+        }
+
+        return (left.nombre || left.empresa || left.email || "").localeCompare(right.nombre || right.empresa || right.email || "", "es")
+      }),
+    [sortBy, usuariosBuscados],
+  )
+
+  const parsedItemsPerPage = Number(itemsPerPage) || 10
+  const totalPages = Math.max(1, Math.ceil(usuariosOrdenados.length / parsedItemsPerPage))
+  const currentPageSafe = Math.min(currentPage, totalPages)
+  const pageStartIndex = (currentPageSafe - 1) * parsedItemsPerPage
+  const pageEndIndex = pageStartIndex + parsedItemsPerPage
+  const usuariosPaginados = useMemo(
+    () => usuariosOrdenados.slice(pageStartIndex, pageEndIndex),
+    [pageEndIndex, pageStartIndex, usuariosOrdenados],
+  )
+  const visibleItemsLabel =
+    usuariosOrdenados.length === 0
+      ? "0 resultados"
+      : `${pageStartIndex + 1}-${Math.min(pageEndIndex, usuariosOrdenados.length)} de ${usuariosOrdenados.length}`
+
+  const renderPaymentBadges = (userData: ClientListItem) => (
+    <div className="flex flex-wrap gap-1.5">
+      <Badge
+        variant={userData.paymentInfo.status === "vencido" ? "destructive" : userData.paymentInfo.status === "por_vencer" ? "outline" : "default"}
+        className={userData.paymentInfo.status === "por_vencer" ? "border-amber-500 text-amber-600" : ""}
+      >
+        {userData.paymentInfo.status === "al_dia"
+          ? "Al día"
+          : userData.paymentInfo.status === "por_vencer"
+            ? "Por vencer"
+            : "Vencido"}
+      </Badge>
+      <Badge variant={userData.pagoActivo ? "secondary" : "outline"}>
+        {userData.pagoActivo ? "Pago activo" : "Pago pausado"}
+      </Badge>
+      <Badge variant={userData.activo ? "default" : "destructive"}>
+        {userData.activo ? "Activo" : "Suspendido"}
+      </Badge>
+    </div>
+  )
+
+  const renderAccessControls = (userData: ClientListItem) => (
+    <div className="flex flex-col gap-2">
+      {userData.password ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="justify-start gap-2"
+          onClick={() => copyPassword(userData.password || "")}
+        >
+          {copiedPassword === userData.password ? (
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
+          {copiedPassword === userData.password ? "Copiado" : "Copiar"}
+        </Button>
+      ) : (
+        <span className="text-xs text-muted-foreground">No disponible</span>
+      )}
+      <Button
+        variant="secondary"
+        size="sm"
+        className="justify-start gap-2"
+        onClick={() => resendAccessEmail(userData)}
+        disabled={!userData.email || !userData.password || sendingEmail}
+      >
+        {sendingEmail ? (
+          <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+        ) : (
+          <Mail className="h-4 w-4" />
+        )}
+        Reenviar acceso
+      </Button>
+    </div>
+  )
+
+  const renderActionMenu = (userData: ClientListItem) => (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => handleMarkAsPaid(userData.id, userData)}
+        disabled={paymentAction?.userId === userData.id}
+        title="Marcar como pagado"
+      >
+        {paymentAction?.userId === userData.id && paymentAction.type === "mark_paid" ? (
+          <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+        ) : (
+          <Wallet className="h-4 w-4 text-green-500" />
+        )}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => handleSendPaymentReminder(userData.id, userData)}
+        disabled={paymentAction?.userId === userData.id}
+        title="Enviar recordatorio de pago"
+      >
+        {paymentAction?.userId === userData.id && paymentAction.type === "reminder" ? (
+          <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+        ) : (
+          <BellRing className="h-4 w-4 text-amber-500" />
+        )}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+            <MoreHorizontal className="h-4 w-4" />
+            <span className="sr-only">Más acciones</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => handleEditUser(userData.id, userData)}>
+            <Edit className="h-4 w-4" />
+            Editar cliente
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => handleToggleUserStatus(userData.id, userData)}>
+            {userData.activo ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+            {userData.activo ? "Suspender cliente" : "Reactivar cliente"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => handleLoadDemoData(userData.id, userData)}
+            disabled={demoLoadingUserId === userData.id}
+          >
+            {demoLoadingUserId === userData.id ? (
+              <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+            ) : (
+              <Database className="h-4 w-4" />
+            )}
+            Cargar datos demo
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => handleOpenDemoDeleteDialog(userData.id, userData)}
+            disabled={demoDeleteLoading && demoDeleteTarget?.id === userData.id}
+            className="text-amber-600"
+          >
+            {demoDeleteLoading && demoDeleteTarget?.id === userData.id ? (
+              <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+            Eliminar demo
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => handleOpenPermanentDeleteDialog(userData.id, userData)}
+            className="text-red-600"
+          >
+            <Trash2 className="h-4 w-4" />
+            Eliminar definitivamente
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+
+  const renderUserCard = (userData: ClientListItem) => {
+    const businessId = getClientBusinessId(userData, userData.id)
+    const businessName = getBusinessDisplayName(userData, businessId)
+    const createdDate = formatBillingDate(userData.fechaAlta || userData.createdAt || userData.fechaCreacion) || "-"
+
+    return (
+      <Card
+        key={userData.id}
+        role="button"
+        tabIndex={0}
+        aria-label={`Abrir cliente ${businessName}`}
+        className={`${userData.activo === false ? "border-muted bg-muted/40" : "shadow-sm"} cursor-pointer transition hover:shadow-md`}
+        onClick={() => openClientDetail(userData)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault()
+            openClientDetail(userData)
+          }
+        }}
+      >
+        <CardContent className="p-4">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="truncate font-semibold text-foreground">{businessName}</h3>
+                  <Badge variant={userData.rol === "admin" ? "default" : "secondary"}>{userData.rol}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground break-all">{userData.email}</p>
+                {businessName !== businessId && (
+                  <p className="font-mono text-[11px] text-muted-foreground break-all">{businessId}</p>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <Badge variant={userData.activo ? "default" : "destructive"} className="shrink-0">
+                  {userData.activo ? "Activo" : "Suspendido"}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-lg bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">Plan</div>
+                <div className="mt-1 font-medium">{userData.plan || "mensual"}</div>
+              </div>
+              <div className="rounded-lg bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">Precio</div>
+                <div className="mt-1 font-medium">${Number(userData.precioMensual ?? 0).toLocaleString("es-AR")}</div>
+              </div>
+              <div className="rounded-lg bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">Últ. pago</div>
+                <div className="mt-1 font-medium">{formatBillingDate(userData.ultimoPago) || "-"}</div>
+              </div>
+              <div className="rounded-lg bg-muted/50 p-3">
+                <div className="text-xs text-muted-foreground">Próx. pago</div>
+                <div className="mt-1 font-medium">{formatBillingDate(userData.proximoPago) || "-"}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="gap-1">
+                <CalendarClock className="h-3.5 w-3.5" />
+                Alta {createdDate}
+              </Badge>
+              <Badge variant="outline" className="gap-1">
+                <Building2 className="h-3.5 w-3.5" />
+                {userData.paymentInfo.diasRestantes === null
+                  ? "Sin fecha"
+                  : `${userData.paymentInfo.diasRestantes} día${Math.abs(userData.paymentInfo.diasRestantes) === 1 ? "" : "s"}`}
+              </Badge>
+            </div>
+
+            {renderPaymentBadges(userData)}
+
+            <div className="rounded-lg border border-border/60 p-3" onClick={(event) => event.stopPropagation()}>
+              <div className="text-xs font-medium text-muted-foreground">Acceso</div>
+              <div className="mt-2">{renderAccessControls(userData)}</div>
+            </div>
+
+            <div className="rounded-lg border border-border/60 p-3" onClick={(event) => event.stopPropagation()}>
+              <div className="text-xs font-medium text-muted-foreground">Acciones</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleMarkAsPaid(userData.id, userData)}
+                  disabled={paymentAction?.userId === userData.id}
+                  className="gap-2"
+                >
+                  {paymentAction?.userId === userData.id && paymentAction.type === "mark_paid" ? (
+                    <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                  ) : (
+                    <Wallet className="h-4 w-4 text-green-500" />
+                  )}
+                  Pagado
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSendPaymentReminder(userData.id, userData)}
+                  disabled={paymentAction?.userId === userData.id}
+                  className="gap-2"
+                >
+                  {paymentAction?.userId === userData.id && paymentAction.type === "reminder" ? (
+                    <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                  ) : (
+                    <BellRing className="h-4 w-4 text-amber-500" />
+                  )}
+                  Recordatorio
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => handleEditUser(userData.id, userData)} className="gap-2">
+                  <Edit className="h-4 w-4" />
+                  Editar
+                </Button>
+                <Button
+                  variant={userData.activo ? "destructive" : "secondary"}
+                  size="sm"
+                  onClick={() => handleToggleUserStatus(userData.id, userData)}
+                  className="gap-2"
+                >
+                  {userData.activo ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                  {userData.activo ? "Suspender" : "Reactivar"}
+                </Button>
+              </div>
+              <div className="mt-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="w-full gap-2">
+                      <MoreHorizontal className="h-4 w-4" />
+                      Más opciones
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                    <DropdownMenuItem
+                      onSelect={() => handleLoadDemoData(userData.id, userData)}
+                      disabled={demoLoadingUserId === userData.id}
+                    >
+                      {demoLoadingUserId === userData.id ? (
+                        <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                      ) : (
+                        <Database className="h-4 w-4" />
+                      )}
+                      Cargar datos demo
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => handleOpenDemoDeleteDialog(userData.id, userData)}
+                      disabled={demoDeleteLoading && demoDeleteTarget?.id === userData.id}
+                      className="text-amber-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Eliminar demo
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => handleOpenPermanentDeleteDialog(userData.id, userData)}
+                      className="text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Eliminar definitivamente
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const renderEmptyState = () => (
+    <div className="flex flex-col items-center gap-3 py-8 text-center text-muted-foreground">
+      {loadingUsers ? (
+        <div className="space-y-2">
+          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-b-2 border-primary" />
+          <p>Cargando clientes...</p>
+        </div>
+      ) : (
+      <p>
+        {usuariosOrdenados.length === 0
+          ? "No hay coincidencias con los filtros aplicados."
+          : "No hay usuarios registrados"}
+      </p>
+      )}
+      {!loadingUsers && usuariosOrdenados.length === 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setSearchTerm("")
+            setPaymentFilter("all")
+            setSortBy("due")
+            setCurrentPage(1)
+          }}
+        >
+          Limpiar filtros
+        </Button>
+      )}
+    </div>
   )
 
   return (
@@ -1372,40 +1999,82 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         )}
         <div className="space-y-6">
           {/* Estadísticas */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Total Usuarios</p>
-                    <p className="text-2xl font-bold">{usuariosArray.length}</p>
-                  </div>
-                  <Users className="h-8 w-8 text-blue-500" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Usuarios Activos</p>
-                    <p className="text-2xl font-bold text-green-600">{usuariosActivos.length}</p>
-                  </div>
-                  <UserCheck className="h-8 w-8 text-green-500" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Clientes Suspendidos</p>
-                    <p className="text-2xl font-bold text-red-600">{usuariosInactivos.length}</p>
-                  </div>
-                  <UserX className="h-8 w-8 text-red-500" />
-                </div>
-              </CardContent>
-            </Card>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {[
+              {
+                label: "Total clientes",
+                value: usuariosArray.length,
+                helper: "Registrados en el sistema",
+                icon: Users,
+                iconClassName: "text-blue-500",
+              },
+              {
+                label: "Activos",
+                value: usuariosActivos.length,
+                helper: "Con acceso habilitado",
+                icon: UserCheck,
+                iconClassName: "text-green-500",
+              },
+              {
+                label: "Suspendidos",
+                value: usuariosInactivos.length,
+                helper: "Bloqueados temporalmente",
+                icon: UserX,
+                iconClassName: "text-red-500",
+              },
+              {
+                label: "Al día",
+                value: paymentStatusCounts.al_dia,
+                helper: "Pagos vigentes",
+                icon: CheckCircle,
+                iconClassName: "text-emerald-500",
+              },
+              {
+                label: "Por vencer",
+                value: paymentStatusCounts.por_vencer,
+                helper: "Requieren seguimiento",
+                icon: BellRing,
+                iconClassName: "text-amber-500",
+              },
+              {
+                label: "Vencidos",
+                value: paymentStatusCounts.vencido,
+                helper: "Clientes con mora",
+                icon: AlertCircle,
+                iconClassName: "text-rose-500",
+              },
+              {
+                label: "MRR estimado",
+                value: `$${totalMonthlyRevenue.toLocaleString("es-AR")}`,
+                helper: "Ingreso mensual activo",
+                icon: BadgeDollarSign,
+                iconClassName: "text-violet-500",
+              },
+              {
+                label: "En riesgo",
+                value: `$${atRiskRevenue.toLocaleString("es-AR")}`,
+                helper: "Suma de vencidos y por vencer",
+                icon: Wallet,
+                iconClassName: "text-orange-500",
+              },
+            ].map((metric) => {
+              const MetricIcon = metric.icon
+
+              return (
+                <Card key={metric.label} className="shadow-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-sm font-medium text-muted-foreground">{metric.label}</p>
+                        <p className="text-2xl font-bold leading-none">{metric.value}</p>
+                        <p className="text-xs text-muted-foreground">{metric.helper}</p>
+                      </div>
+                      <MetricIcon className={`h-8 w-8 shrink-0 ${metric.iconClassName}`} />
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1420,7 +2089,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                   Nuevo Usuario
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
+              <DialogContent className="w-[95vw] sm:w-[90vw] max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
                   <DialogTitle>
                     {editingUser ? "Editar Usuario" : "Crear Nuevo Usuario"}
@@ -1662,7 +2331,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                 }
               }}
             >
-              <DialogContent className="sm:max-w-lg">
+              <DialogContent className="w-[95vw] sm:w-[90vw] max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
                   <DialogTitle>Ya existen datos previos asociados a este cliente</DialogTitle>
                 </DialogHeader>
@@ -1724,7 +2393,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                 }
               }}
             >
-              <DialogContent className="sm:max-w-lg">
+              <DialogContent className="w-[95vw] sm:w-[90vw] max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
                   <DialogTitle>Eliminar datos demo</DialogTitle>
                 </DialogHeader>
@@ -1784,7 +2453,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                 }
               }}
             >
-              <DialogContent className="sm:max-w-lg">
+              <DialogContent className="w-[95vw] sm:w-[90vw] max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
                   <DialogTitle>Eliminar cliente definitivamente</DialogTitle>
                 </DialogHeader>
@@ -1837,6 +2506,340 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
             </Dialog>
           </div>
 
+          <Dialog
+            open={Boolean(selectedClientTarget)}
+            onOpenChange={(open) => {
+              if (!open) {
+                closeClientDetail()
+              }
+            }}
+          >
+            <DialogContent className="w-[95vw] sm:w-[90vw] max-w-6xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+              {selectedClientTarget && (() => {
+                const userData = selectedClientTarget
+                const businessId = getClientBusinessId(userData, userData.id)
+                const businessName = getBusinessDisplayName(userData, businessId)
+                const createdDate = formatBillingDate(userData.fechaAlta || userData.createdAt || userData.fechaCreacion) || "-"
+                const updatedDate = formatBillingDate(userData.updatedAt || userData.fechaActualizacion) || "-"
+
+                return (
+                  <div className="space-y-6">
+                    <DialogHeader className="space-y-2">
+                      <DialogTitle className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="truncate">{businessName}</span>
+                        <Badge variant={userData.activo ? "default" : "destructive"} className="w-fit">
+                          {userData.activo ? "Activo" : "Suspendido"}
+                        </Badge>
+                      </DialogTitle>
+                      <p className="text-sm text-muted-foreground break-all">
+                        {userData.email || "Sin email"} · {userData.empresa || "Sin empresa"}
+                      </p>
+                    </DialogHeader>
+
+                    <div className="rounded-2xl border border-border/60 bg-muted/20 p-4 shadow-sm">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        {[
+                          {
+                            label: "Estado de cuenta",
+                            value:
+                              userData.paymentInfo.status === "al_dia"
+                                ? "Al día"
+                                : userData.paymentInfo.status === "por_vencer"
+                                  ? "Por vencer"
+                                  : "Vencido",
+                            helper: userData.pagoActivo ? "Pago activo" : "Pago pausado",
+                            icon: Wallet,
+                            iconClassName: userData.paymentInfo.status === "vencido" ? "text-red-500" : userData.paymentInfo.status === "por_vencer" ? "text-amber-500" : "text-emerald-500",
+                          },
+                          {
+                            label: "Días restantes",
+                            value:
+                              userData.paymentInfo.diasRestantes === null
+                                ? "-"
+                                : `${userData.paymentInfo.diasRestantes} día${Math.abs(userData.paymentInfo.diasRestantes) === 1 ? "" : "s"}`,
+                            helper: `Próximo pago ${formatBillingDate(userData.proximoPago) || "-"}`,
+                            icon: CalendarClock,
+                            iconClassName: "text-blue-500",
+                          },
+                          {
+                            label: "Ingreso mensual",
+                            value: `$${Number(userData.precioMensual ?? 0).toLocaleString("es-AR")}`,
+                            helper: userData.plan || "mensual",
+                            icon: BadgeDollarSign,
+                            iconClassName: "text-violet-500",
+                          },
+                          {
+                            label: "Acceso",
+                            value: userData.activo ? "Habilitado" : "Suspendido",
+                            helper:
+                              userData.paymentReminderCount && userData.paymentReminderCount > 0
+                                ? `${userData.paymentReminderCount} recordatorio${userData.paymentReminderCount === 1 ? "" : "s"} enviado${userData.paymentReminderCount === 1 ? "" : "s"}`
+                                : "Sin recordatorios",
+                            icon: userData.activo ? UserCheck : UserX,
+                            iconClassName: userData.activo ? "text-green-500" : "text-red-500",
+                          },
+                        ].map((metric) => {
+                          const MetricIcon = metric.icon
+
+                          return (
+                            <div key={metric.label} className="rounded-xl border border-border/60 bg-background/80 p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 space-y-1">
+                                  <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
+                                  <div className="text-lg font-semibold text-foreground">{metric.value}</div>
+                                  <div className="text-xs text-muted-foreground">{metric.helper}</div>
+                                </div>
+                                <MetricIcon className={`h-5 w-5 shrink-0 ${metric.iconClassName}`} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+                      <Card className="shadow-sm">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base">Información del cliente</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { label: "Nombre", value: userData.nombre || "Sin nombre" },
+                              { label: "Empresa", value: userData.empresa || "Sin empresa" },
+                              { label: "Negocio", value: businessName },
+                              { label: "Business ID", value: businessId },
+                              { label: "UID", value: userData.uid || userData.id },
+                              { label: "Firebase UID", value: userData.firebaseUid || userData.uid || userData.id },
+                              { label: "Rol", value: userData.rol || "user" },
+                              { label: "Plan", value: userData.plan || "mensual" },
+                              { label: "Precio mensual", value: `$${Number(userData.precioMensual ?? 0).toLocaleString("es-AR")}` },
+                              { label: "Fecha alta", value: createdDate },
+                              { label: "Última actualización", value: updatedDate },
+                              { label: "Días aviso", value: String(userData.diasAvisoPago ?? 3) },
+                              { label: "Último pago", value: formatBillingDate(userData.ultimoPago) || "-" },
+                              { label: "Próximo pago", value: formatBillingDate(userData.proximoPago) || "-" },
+                            ].map((field) => (
+                              <div key={field.label} className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                                <div className="text-xs font-medium text-muted-foreground">{field.label}</div>
+                                <div className="mt-1 break-words text-sm font-medium text-foreground">{field.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="space-y-2">
+                            <div className="text-xs font-medium text-muted-foreground">Notas de pago</div>
+                            <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-foreground">
+                              {userData.paymentNotes?.trim() || "Sin notas"}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <div className="space-y-4">
+                        <Card className="shadow-sm">
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base">Estado y pagos</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            {renderPaymentBadges(userData)}
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                                <div className="text-xs text-muted-foreground">Pago activo</div>
+                                <div className="mt-1 font-medium">{userData.pagoActivo ? "Sí" : "No"}</div>
+                              </div>
+                              <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                                <div className="text-xs text-muted-foreground">Días restantes</div>
+                                <div className="mt-1 font-medium">
+                                  {userData.paymentInfo.diasRestantes === null
+                                    ? "-"
+                                    : `${userData.paymentInfo.diasRestantes} día${Math.abs(userData.paymentInfo.diasRestantes) === 1 ? "" : "s"}`}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => handleMarkAsPaid(userData.id, userData)}
+                                disabled={paymentAction?.userId === userData.id}
+                                className="gap-2"
+                              >
+                                {paymentAction?.userId === userData.id && paymentAction.type === "mark_paid" ? (
+                                  <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                ) : (
+                                  <Wallet className="h-4 w-4" />
+                                )}
+                                Marcar como pagado
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleSendPaymentReminder(userData.id, userData)}
+                                disabled={paymentAction?.userId === userData.id}
+                                className="gap-2"
+                              >
+                                {paymentAction?.userId === userData.id && paymentAction.type === "reminder" ? (
+                                  <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                ) : (
+                                  <BellRing className="h-4 w-4 text-amber-500" />
+                                )}
+                                Recordatorio
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        <Card className="shadow-sm">
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base">Acceso</CardTitle>
+                          </CardHeader>
+                          <CardContent>{renderAccessControls(userData)}</CardContent>
+                        </Card>
+
+                        <Card className="shadow-sm">
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base">Acciones del cliente</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => {
+                                  closeClientDetail()
+                                  handleEditUser(userData.id, userData)
+                                }}
+                                className="justify-start gap-2"
+                              >
+                                <Edit className="h-4 w-4" />
+                                Editar cliente
+                              </Button>
+                              <Button
+                                variant={userData.activo ? "destructive" : "secondary"}
+                                size="sm"
+                                onClick={() => handleToggleUserStatus(userData.id, userData)}
+                                className="justify-start gap-2"
+                              >
+                                {userData.activo ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                                {userData.activo ? "Suspender" : "Reactivar"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleLoadDemoData(userData.id, userData)}
+                                disabled={demoLoadingUserId === userData.id}
+                                className="justify-start gap-2"
+                              >
+                                {demoLoadingUserId === userData.id ? (
+                                  <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                ) : (
+                                  <Database className="h-4 w-4" />
+                                )}
+                                Cargar datos demo
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  closeClientDetail()
+                                  handleOpenDemoDeleteDialog(userData.id, userData)
+                                }}
+                                disabled={demoDeleteLoading && demoDeleteTarget?.id === userData.id}
+                                className="justify-start gap-2 text-amber-600"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Eliminar demo
+                              </Button>
+                            </div>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => {
+                                  closeClientDetail()
+                                  handleOpenPermanentDeleteDialog(userData.id, userData)
+                                }}
+                                className="w-full gap-2"
+                              >
+                              <Trash2 className="h-4 w-4" />
+                              Eliminar definitivamente
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+            </DialogContent>
+          </Dialog>
+
+          <div className="rounded-2xl border bg-card/80 p-4 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                  Control de lista
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Buscá por nombre, email, empresa o negocio. Ordená por vencimiento, antigüedad o monto.
+                </p>
+              </div>
+              <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-4 lg:max-w-4xl">
+                <div className="relative sm:col-span-2 xl:col-span-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Buscar cliente, email o negocio"
+                    className="pl-9"
+                  />
+                </div>
+                <Select value={sortBy} onValueChange={(value) => setSortBy(value as typeof sortBy)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Ordenar por" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="due">Pago más urgente</SelectItem>
+                    <SelectItem value="recent">Más recientes</SelectItem>
+                    <SelectItem value="name">Nombre A-Z</SelectItem>
+                    <SelectItem value="mrr">Mayor MRR</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={itemsPerPage} onValueChange={setItemsPerPage}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Por página" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5 por página</SelectItem>
+                    <SelectItem value="10">10 por página</SelectItem>
+                    <SelectItem value="20">20 por página</SelectItem>
+                    <SelectItem value="50">50 por página</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                  <div className="min-w-0 text-sm text-muted-foreground">
+                    <div className="font-medium text-foreground">{visibleItemsLabel}</div>
+                    <div className="text-xs text-muted-foreground">Vista optimizada con cache local</div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => loadData({ force: true })}
+                    disabled={loadingUsers}
+                  >
+                    {loadingUsers ? (
+                      <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    Actualizar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-2">
             {[
               { key: "all", label: "Todos", count: usuariosConPagos.length },
@@ -1856,185 +2859,269 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
             ))}
           </div>
 
-          <Card>
+          <div className="grid gap-4 md:hidden">
+            {usuariosPaginados.length === 0 ? renderEmptyState() : usuariosPaginados.map(renderUserCard)}
+          </div>
+
+          <Card className="hidden overflow-hidden shadow-sm md:block">
             <CardContent className="p-0">
+              <div className="flex flex-col gap-2 border-b border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-muted-foreground">
+                  Mostrando <span className="font-medium text-foreground">{visibleItemsLabel}</span>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {usuariosOrdenados.length === 0 ? "Sin resultados" : `${totalPages} página${totalPages === 1 ? "" : "s"}`}
+                </div>
+              </div>
               <div className="w-full overflow-x-auto">
-              <Table className="min-w-[1280px] w-full">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Empresa</TableHead>
-                    <TableHead>Rol</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Plan</TableHead>
-                    <TableHead>Precio</TableHead>
-                    <TableHead>Últ. pago</TableHead>
-                    <TableHead>Próx. pago</TableHead>
-                    <TableHead>Días</TableHead>
-                    <TableHead>Pago</TableHead>
-                    <TableHead>Acceso</TableHead>
-                    <TableHead>Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {usuariosFiltrados.length === 0 ? (
+                <Table className="min-w-[1500px] w-full">
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
-                        No hay usuarios registrados
-                      </TableCell>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>Negocio</TableHead>
+                      <TableHead>Rol</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Plan</TableHead>
+                      <TableHead>Precio</TableHead>
+                      <TableHead>Últ. pago</TableHead>
+                      <TableHead>Próx. pago</TableHead>
+                      <TableHead>Días</TableHead>
+                      <TableHead>Pago</TableHead>
+                      <TableHead>Acceso</TableHead>
+                      <TableHead>Acciones</TableHead>
                     </TableRow>
-                  ) : (
-                    usuariosFiltrados.map((userData) => (
-                      <TableRow key={userData.id} className={userData.activo === false ? "bg-muted/50" : ""}>
-                        <TableCell className="font-medium">{userData.nombre}</TableCell>
-                        <TableCell>{userData.email}</TableCell>
-                        <TableCell>{userData.empresa || "Sin empresa"}</TableCell>
-                        <TableCell>
-                          <Badge variant={userData.rol === "admin" ? "default" : "secondary"}>
-                            {userData.rol}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={userData.activo ? "default" : "destructive"}>
-                            {userData.activo ? "Activo" : "Suspendido"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{userData.plan || "mensual"}</TableCell>
-                        <TableCell>${Number(userData.precioMensual ?? 0).toLocaleString("es-AR")}</TableCell>
-                        <TableCell>{formatBillingDate(userData.ultimoPago) || "-"}</TableCell>
-                        <TableCell>{formatBillingDate(userData.proximoPago) || "-"}</TableCell>
-                        <TableCell>
-                          {userData.paymentInfo.diasRestantes === null
-                            ? "-"
-                            : `${userData.paymentInfo.diasRestantes} día${Math.abs(userData.paymentInfo.diasRestantes) === 1 ? "" : "s"}`}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge
-                              variant={userData.paymentInfo.status === "vencido" ? "destructive" : userData.paymentInfo.status === "por_vencer" ? "outline" : "default"}
-                              className={userData.paymentInfo.status === "por_vencer" ? "border-amber-500 text-amber-600" : ""}
-                            >
-                              {userData.paymentInfo.status === "al_dia"
-                                ? "Al día"
-                                : userData.paymentInfo.status === "por_vencer"
-                                  ? "Por vencer"
-                                  : "Vencido"}
-                            </Badge>
-                            <Badge variant={userData.pagoActivo ? "secondary" : "outline"}>
-                              {userData.pagoActivo ? "Pago activo" : "Pago pausado"}
-                            </Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-2">
-                            {userData.password ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="justify-start gap-2"
-                                onClick={() => copyPassword(userData.password || "")}
-                              >
-                                {copiedPassword === userData.password ? (
-                                  <CheckCircle className="h-4 w-4 text-green-500" />
-                                ) : (
-                                  <Copy className="h-4 w-4" />
-                                )}
-                                {copiedPassword === userData.password ? "Copiado" : "Copiar"}
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">No disponible</span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                      <div className="flex gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleMarkAsPaid(userData.id, userData)}
-                              disabled={paymentAction?.userId === userData.id}
-                              title="Marcar como pagado"
-                            >
-                              {paymentAction?.userId === userData.id && paymentAction.type === "mark_paid" ? (
-                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
-                              ) : (
-                                <Wallet className="h-4 w-4 text-green-500" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleSendPaymentReminder(userData.id, userData)}
-                              disabled={paymentAction?.userId === userData.id}
-                              title="Enviar recordatorio de pago"
-                            >
-                              {paymentAction?.userId === userData.id && paymentAction.type === "reminder" ? (
-                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
-                              ) : (
-                                <BellRing className="h-4 w-4 text-amber-500" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEditUser(userData.id, userData)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleToggleUserStatus(userData.id, userData)}
-                              title={userData.activo ? "Suspender cliente" : "Reactivar cliente"}
-                            >
-                              {userData.activo ? (
-                                <UserX className="h-4 w-4 text-red-500" />
-                              ) : (
-                                <UserCheck className="h-4 w-4 text-green-500" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleLoadDemoData(userData.id, userData)}
-                              title="Cargar datos demo"
-                              disabled={demoLoadingUserId === userData.id}
-                            >
-                              {demoLoadingUserId === userData.id ? (
-                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
-                              ) : (
-                                <Database className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleOpenDemoDeleteDialog(userData.id, userData)}
-                              title="Eliminar datos demo"
-                              disabled={demoDeleteLoading && demoDeleteTarget?.id === userData.id}
-                            >
-                              {demoDeleteLoading && demoDeleteTarget?.id === userData.id ? (
-                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
-                              ) : (
-                                <Trash2 className="h-4 w-4 text-amber-500" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleOpenPermanentDeleteDialog(userData.id, userData)}
-                              title="Eliminar definitivamente"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                  </TableHeader>
+                  <TableBody>
+                    {usuariosPaginados.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={14} className="py-8 text-center text-muted-foreground">
+                          {renderEmptyState()}
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : (
+                      usuariosPaginados.map((userData) => {
+                        const businessId = getClientBusinessId(userData, userData.id)
+                        const businessName = getBusinessDisplayName(userData, businessId)
+                        const createdDate = formatBillingDate(userData.fechaAlta || userData.createdAt || userData.fechaCreacion) || "-"
+
+                        return (
+                          <TableRow
+                            key={userData.id}
+                            className={`${userData.activo === false ? "bg-muted/50" : ""} cursor-pointer transition hover:bg-muted/50`}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Abrir cliente ${businessName}`}
+                            onClick={() => openClientDetail(userData)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault()
+                                openClientDetail(userData)
+                              }
+                            }}
+                          >
+                            <TableCell className="font-medium">
+                              <div className="space-y-1">
+                                <div>{userData.nombre || "Sin nombre"}</div>
+                                <div className="text-xs text-muted-foreground">{userData.uid || userData.firebaseUid || userData.id}</div>
+                              </div>
+                            </TableCell>
+                            <TableCell>{userData.email}</TableCell>
+                            <TableCell>{userData.empresa || "Sin empresa"}</TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1 font-medium text-foreground">
+                                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span className="truncate max-w-[240px]">{businessName}</span>
+                                </div>
+                                {businessName !== businessId && (
+                                  <div className="font-mono text-[11px] text-muted-foreground break-all">{businessId}</div>
+                                )}
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <CalendarClock className="h-3.5 w-3.5" />
+                                  Alta {createdDate}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={userData.rol === "admin" ? "default" : "secondary"}>
+                                {userData.rol}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={userData.activo ? "default" : "destructive"}>
+                                {userData.activo ? "Activo" : "Suspendido"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{userData.plan || "mensual"}</TableCell>
+                            <TableCell>${Number(userData.precioMensual ?? 0).toLocaleString("es-AR")}</TableCell>
+                            <TableCell>{formatBillingDate(userData.ultimoPago) || "-"}</TableCell>
+                            <TableCell>{formatBillingDate(userData.proximoPago) || "-"}</TableCell>
+                            <TableCell>
+                              {userData.paymentInfo.diasRestantes === null
+                                ? "-"
+                                : `${userData.paymentInfo.diasRestantes} día${Math.abs(userData.paymentInfo.diasRestantes) === 1 ? "" : "s"}`}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <Badge
+                                  variant={userData.paymentInfo.status === "vencido" ? "destructive" : userData.paymentInfo.status === "por_vencer" ? "outline" : "default"}
+                                  className={userData.paymentInfo.status === "por_vencer" ? "border-amber-500 text-amber-600" : ""}
+                                >
+                                  {userData.paymentInfo.status === "al_dia"
+                                    ? "Al día"
+                                    : userData.paymentInfo.status === "por_vencer"
+                                      ? "Por vencer"
+                                      : "Vencido"}
+                                </Badge>
+                                <Badge variant={userData.pagoActivo ? "secondary" : "outline"}>
+                                  {userData.pagoActivo ? "Pago activo" : "Pago pausado"}
+                                </Badge>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col gap-2" onClick={(event) => event.stopPropagation()}>
+                                {userData.password ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="justify-start gap-2"
+                                    onClick={() => copyPassword(userData.password || "")}
+                                  >
+                                    {copiedPassword === userData.password ? (
+                                      <CheckCircle className="h-4 w-4 text-green-500" />
+                                    ) : (
+                                      <Copy className="h-4 w-4" />
+                                    )}
+                                    {copiedPassword === userData.password ? "Copiado" : "Copiar"}
+                                  </Button>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">No disponible</span>
+                                )}
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="justify-start gap-2"
+                                  onClick={() => resendAccessEmail(userData)}
+                                  disabled={!userData.email || !userData.password || sendingEmail}
+                                >
+                                  {sendingEmail ? (
+                                    <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                  ) : (
+                                    <Mail className="h-4 w-4" />
+                                  )}
+                                  Reenviar acceso
+                                </Button>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleMarkAsPaid(userData.id, userData)}
+                                  disabled={paymentAction?.userId === userData.id}
+                                  title="Marcar como pagado"
+                                >
+                                  {paymentAction?.userId === userData.id && paymentAction.type === "mark_paid" ? (
+                                    <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                  ) : (
+                                    <Wallet className="h-4 w-4 text-green-500" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleSendPaymentReminder(userData.id, userData)}
+                                  disabled={paymentAction?.userId === userData.id}
+                                  title="Enviar recordatorio de pago"
+                                >
+                                  {paymentAction?.userId === userData.id && paymentAction.type === "reminder" ? (
+                                    <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                  ) : (
+                                    <BellRing className="h-4 w-4 text-amber-500" />
+                                  )}
+                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                      <span className="sr-only">Más acciones</span>
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-56">
+                                    <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onSelect={() => handleEditUser(userData.id, userData)}>
+                                      <Edit className="h-4 w-4" />
+                                      Editar cliente
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onSelect={() => handleToggleUserStatus(userData.id, userData)}
+                                    >
+                                      {userData.activo ? (
+                                        <UserX className="h-4 w-4" />
+                                      ) : (
+                                        <UserCheck className="h-4 w-4" />
+                                      )}
+                                      {userData.activo ? "Suspender cliente" : "Reactivar cliente"}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onSelect={() => handleLoadDemoData(userData.id, userData)}
+                                      disabled={demoLoadingUserId === userData.id}
+                                    >
+                                      {demoLoadingUserId === userData.id ? (
+                                        <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                      ) : (
+                                        <Database className="h-4 w-4" />
+                                      )}
+                                      Cargar datos demo
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onSelect={() => handleOpenDemoDeleteDialog(userData.id, userData)}
+                                      disabled={demoDeleteLoading && demoDeleteTarget?.id === userData.id}
+                                      className="text-amber-600"
+                                    >
+                                      {demoDeleteLoading && demoDeleteTarget?.id === userData.id ? (
+                                        <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                                      ) : (
+                                        <Trash2 className="h-4 w-4" />
+                                      )}
+                                      Eliminar demo
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onSelect={() => handleOpenPermanentDeleteDialog(userData.id, userData)}
+                                      className="text-red-600"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      Eliminar definitivamente
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="border-t border-border/60 px-4 py-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    {usuariosOrdenados.length === 0
+                      ? "No hay coincidencias para los filtros seleccionados."
+                      : `Página ${currentPageSafe} de ${totalPages}`}
+                  </div>
+                  <Pagination
+                    currentPage={currentPageSafe}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>

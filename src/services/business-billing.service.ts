@@ -1,6 +1,7 @@
 import { ref, set } from "firebase/database"
 import { collection, doc, getDoc, getDocs, limit, query, setDoc, where } from "firebase/firestore"
 import { database, firestore } from "@/src/lib/firebase/client"
+import { getBusinessCache, invalidateBusinessCache, setBusinessCache } from "@/src/lib/business-cache"
 import { sanitizeFirestoreData } from "@/lib/product-sync"
 
 export type BillingStatus = "al_dia" | "por_vencer" | "vencido"
@@ -256,11 +257,16 @@ export const loadBusinessBillingRecord = async (
     return null
   }
 
+  const cachedRecord = getBusinessCache<BusinessBillingRecord>("billing", businessId, "record")
+  if (cachedRecord) {
+    return cachedRecord
+  }
+
   try {
     const snapshot = await getDoc(doc(firestore, "businesses", businessId))
     const firestoreData = snapshot.exists() && isPlainObject(snapshot.data()) ? snapshot.data() : {}
 
-    return normalizeBillingRecord(
+    const normalizedRecord = normalizeBillingRecord(
       {
         ...fallbackData,
         ...firestoreData,
@@ -268,9 +274,14 @@ export const loadBusinessBillingRecord = async (
       },
       businessId,
     )
+
+    setBusinessCache("billing", businessId, normalizedRecord, "record")
+    return normalizedRecord
   } catch (error) {
     console.error("Error al cargar datos de pago del negocio:", error)
-    return normalizeBillingRecord({ ...fallbackData, businessId }, businessId)
+    const fallbackRecord = normalizeBillingRecord({ ...fallbackData, businessId }, businessId)
+    setBusinessCache("billing", businessId, fallbackRecord, "record")
+    return fallbackRecord
   }
 }
 
@@ -290,7 +301,7 @@ export const findBusinessBillingRecordsByEmail = async (email: string): Promise<
       ),
     )
 
-    return snapshot.docs.map((documentSnapshot) =>
+    const records = snapshot.docs.map((documentSnapshot) =>
       normalizeBillingRecord(
         {
           ...documentSnapshot.data(),
@@ -299,6 +310,8 @@ export const findBusinessBillingRecordsByEmail = async (email: string): Promise<
         documentSnapshot.id,
       ),
     )
+
+    return records
   } catch (error) {
     console.error("Error al buscar negocios por email:", error)
     return []
@@ -328,6 +341,8 @@ export const saveBusinessBillingRecord = async (
   const firestorePayload = sanitizeFirestoreData(normalizedRecord)
 
   await setDoc(doc(firestore, "businesses", businessId), firestorePayload, { merge: true })
+  invalidateBusinessCache(businessId, ["billing"])
+  setBusinessCache("billing", businessId, normalizedRecord, "record")
 
   if (legacyMirror) {
     await set(ref(database, `usuarios/${businessId}`), sanitizeFirestoreData({ ...legacyMirror, ...normalizedRecord }))
