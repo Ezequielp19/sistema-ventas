@@ -555,7 +555,7 @@ export default function ProductosTab({ proveedores = {}, onProductsChanged }: Pr
                     <Label htmlFor="imagenes">Imágenes del Producto (Opcional)</Label>
                     <div className="space-y-2">
                       {(imagePreviews.length > 0 || formData.imagenes?.length > 0) && (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                           {formData.imagenes?.map((img, index) => (
                             <div key={`existing-${index}`} className="relative w-full h-32 border rounded-lg overflow-hidden">
                               <img
@@ -637,8 +637,8 @@ export default function ProductosTab({ proveedores = {}, onProductsChanged }: Pr
                     </div>
                   </div>
 
-                  <div className="flex justify-end space-x-2">
-                    <Button type="button" variant="outline" onClick={() => setShowDialog(false)}>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="outline" onClick={() => setShowDialog(false)} className="w-full sm:w-auto">
                       Cancelar
                     </Button>
                     <Button type="submit">
@@ -756,7 +756,7 @@ export default function ProductosTab({ proveedores = {}, onProductsChanged }: Pr
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="flex space-x-2">
+                      <div className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => handleEdit(producto.id, producto)}>
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -816,7 +816,7 @@ export default function ProductosTab({ proveedores = {}, onProductsChanged }: Pr
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mb-3">
                         <div>
                           <span className="text-muted-foreground">Tipo:</span>
                           <p className="font-medium">{producto.tipo}</p>

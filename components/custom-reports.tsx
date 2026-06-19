@@ -252,7 +252,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <div>
             <h2 className="text-2xl font-bold">Reportes Personalizados</h2>
@@ -294,14 +294,14 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
 
       {/* Tabs principales */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2">
           <TabsTrigger value="reportes">Reportes Personalizados</TabsTrigger>
           <TabsTrigger value="comparativas">Comparativas Avanzadas</TabsTrigger>
         </TabsList>
 
         <TabsContent value="reportes" className="space-y-6">
           {/* Header de reportes */}
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-xl font-semibold">Mis Reportes</h3>
               <p className="text-muted-foreground">Reportes personalizados guardados</p>
@@ -313,12 +313,12 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                   Nuevo Reporte
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl">
+              <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
                   <DialogTitle>Crear Reporte Personalizado</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="nombre">Nombre del Reporte</Label>
                       <Input
@@ -351,7 +351,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                       placeholder="Descripción del reporte"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="periodo">Período</Label>
                       <Select value={newReport.periodo} onValueChange={(value: any) => setNewReport({...newReport, periodo: value})}>
@@ -365,7 +365,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
                         id="comparacion"
@@ -375,11 +375,11 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                       <Label htmlFor="comparacion">Incluir comparativa</Label>
                     </div>
                   </div>
-                  <div className="flex justify-end space-x-2">
-                    <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <Button variant="outline" onClick={() => setShowCreateDialog(false)} className="w-full sm:w-auto">
                       Cancelar
                     </Button>
-                    <Button onClick={createCustomReport}>
+                    <Button onClick={createCustomReport} className="w-full sm:w-auto">
                       <Save className="h-4 w-4 mr-2" />
                       Crear Reporte
                     </Button>
@@ -398,12 +398,12 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
               return (
                 <Card key={report.id} className="hover:shadow-lg transition-shadow">
                   <CardHeader>
-                    <div className="flex justify-between items-start">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <CardTitle className="text-lg">{report.nombre}</CardTitle>
                         <p className="text-sm text-muted-foreground">{report.descripcion}</p>
                       </div>
-                      <div className="flex space-x-1">
+                      <div className="flex gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -420,7 +420,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                         </Button>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline">{report.tipo}</Badge>
                       <Badge variant="secondary">{report.configuracion.periodo}</Badge>
                       {report.configuracion.comparacion && (
@@ -430,7 +430,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                         <div>
                           <p className="text-muted-foreground">Total Ventas</p>
                           <p className="font-semibold">${reportData.metricas.totalVentas.toFixed(2)}</p>
@@ -443,7 +443,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
                       {comparisonData && (
                         <div className="space-y-1">
                           <p className="text-xs text-muted-foreground">Variación vs período anterior</p>
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center gap-2">
                             <span className={`text-sm font-medium ${
                               comparisonData.variaciones.total > 0 ? 'text-green-600' : 'text-red-600'
                             }`}>
@@ -473,12 +473,12 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
       {/* Modal de Vista Detallada */}
       {selectedReport && (
         <Dialog open={!!selectedReport} onOpenChange={() => setSelectedReport(null)}>
-          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:w-[90vw] max-w-6xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle>{selectedReport.nombre}</DialogTitle>
             </DialogHeader>
             <Tabs defaultValue="resumen" className="w-full">
-              <TabsList>
+              <TabsList className="max-w-full overflow-x-auto">
                 <TabsTrigger value="resumen">Resumen</TabsTrigger>
                 <TabsTrigger value="graficos">Gráficos</TabsTrigger>
                 <TabsTrigger value="detalle">Detalle</TabsTrigger>
@@ -488,7 +488,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
               </TabsList>
 
               <TabsContent value="resumen" className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                   {(() => {
                     const data = generateReportData(selectedReport)
                     return (
@@ -564,7 +564,7 @@ export default function CustomReports({ ventas, productos, proveedores }: Custom
               </TabsContent>
 
               <TabsContent value="detalle" className="space-y-4">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="text-lg font-semibold">Detalle de Ventas</h3>
                   <ExportButtons 
                     data={generateReportData(selectedReport).ventasPeriodo} 

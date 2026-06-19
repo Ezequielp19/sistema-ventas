@@ -128,7 +128,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
     if (isMobile) {
       // En móvil, usar botones simples en lugar de TabsTrigger
       return (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <SheetClose asChild>
             <Button
               variant={activeTab === "productos" ? "default" : "outline"}
@@ -246,14 +246,14 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
   return (
     <div className="min-h-screen bg-background">
       <header className="bg-card shadow-sm border-b border-border">
-        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
-          <div className="flex justify-between items-center py-3 sm:py-4">
-            <div className="flex items-center space-x-4">
-              <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate">ControlStock</h1>
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+          <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:space-x-4">
+              <h1 className="max-w-full truncate text-lg font-bold text-foreground sm:text-2xl">ControlStock</h1>
               {empresaInfo && (
                 <div className="hidden sm:flex items-center space-x-2">
                   <Building className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{empresaInfo.nombre}</span>
+                  <span className="max-w-[220px] truncate text-sm text-muted-foreground">{empresaInfo.nombre}</span>
                   <Badge variant="outline" className="text-xs">
                     {empresaInfo.plan}
                   </Badge>
@@ -262,7 +262,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
             </div>
 
             {/* Desktop Navigation */}
-            <div className="hidden lg:flex items-center space-x-4">
+            <div className="hidden lg:flex items-center gap-4">
               <div className="flex flex-wrap gap-1">
                 <Badge variant="outline" className="text-xs">
                   F1 = Venta
@@ -291,7 +291,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
             </div>
 
             {/* Mobile Menu */}
-            <div className="lg:hidden flex items-center space-x-2">
+            <div className="lg:hidden flex items-center gap-2">
               <ThemeToggle />
               <Button variant="outline" onClick={onLogout} size="sm">
                 <LogOut className="h-4 w-4" />
@@ -302,7 +302,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
                     <Menu className="h-4 w-4" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-80">
+                <SheetContent side="right" className="w-[92vw] max-w-sm">
                   <div className="space-y-4">
                     <div className="text-center">
                       <h2 className="text-lg font-semibold">Navegación</h2>
@@ -310,14 +310,14 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
                       {empresaInfo && (
                         <div className="mt-2 flex items-center justify-center space-x-2">
                           <Building className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm text-muted-foreground">{empresaInfo.nombre}</span>
+                          <span className="max-w-[220px] truncate text-sm text-muted-foreground">{empresaInfo.nombre}</span>
                         </div>
                       )}
                     </div>
                     <TabsNavigation isMobile={true} />
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Atajos de Teclado:</div>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                         <Badge variant="outline">F1 = Nueva Venta</Badge>
                         <Badge variant="outline">F2 = Proveedores</Badge>
                         <Badge variant="outline">F3 = Productos</Badge>
@@ -345,7 +345,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
           <div className="mb-4 sm:mb-6">
             <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950">
               <CardHeader className="pb-3">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <CardTitle className="text-red-800 dark:text-red-200 flex items-center text-sm sm:text-base">
                     <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
                     Alertas de Stock Bajo ({stockBajo.length})
@@ -387,7 +387,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
         )}
 
         {/* Estadísticas */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-xs sm:text-sm font-medium">Productos</CardTitle>
@@ -447,7 +447,7 @@ export default function Dashboard({ user, onLogout }: { user: DashboardUser | nu
                     Cambiar Sección
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-80">
+                <SheetContent side="right" className="w-[92vw] max-w-sm">
                   <div className="space-y-4">
                     <h2 className="text-lg font-semibold">Seleccionar Sección</h2>
                     <TabsNavigation isMobile={true} />

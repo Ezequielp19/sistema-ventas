@@ -256,14 +256,14 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold">Comparativas Avanzadas</h2>
           <p className="text-muted-foreground">Análisis detallado de múltiples períodos</p>
         </div>
-        <div className="flex items-center space-x-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <Select value={comparisonType} onValueChange={(value: any) => setComparisonType(value)}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -273,7 +273,7 @@ export default function AdvancedComparisons({ ventas, productos, proveedores, ac
             </SelectContent>
           </Select>
           <Select value={selectedPeriods.toString()} onValueChange={(value) => setSelectedPeriods(Number(value))}>
-            <SelectTrigger className="w-32">
+            <SelectTrigger className="w-full sm:w-32">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

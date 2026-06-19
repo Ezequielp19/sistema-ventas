@@ -131,7 +131,7 @@ export default function Home() {
   if (!isLoggedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <Card className="w-full max-w-sm sm:max-w-md">
+        <Card className="w-full max-w-[92vw] sm:max-w-md">
           <CardHeader className="text-center">
             <CardTitle className="text-lg sm:text-xl">ControlStock - Sistema de Gestión</CardTitle>
           </CardHeader>

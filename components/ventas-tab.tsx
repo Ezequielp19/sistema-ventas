@@ -354,7 +354,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                   {/* Productos disponibles con filtros */}
                   <div className="order-1 lg:order-1">
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
                       <h3 className="font-semibold text-sm sm:text-base">Productos Disponibles</h3>
                       <Badge variant="outline" className="text-xs">{filteredProducts.length} productos</Badge>
                     </div>
@@ -362,7 +362,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                     {/* Filtros */}
                     <div className="space-y-3 mb-4 p-3 sm:p-4 bg-muted rounded-lg">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center gap-2">
                           <Filter className="h-4 w-4 text-muted-foreground" />
                           <span className="text-xs sm:text-sm font-medium">Filtros</span>
                         </div>
@@ -460,7 +460,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
 
                   {/* Carrito */}
                   <div className="order-2 lg:order-2">
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
                       <h3 className="font-semibold text-sm sm:text-base">Carrito de Compras</h3>
                       <Badge variant="outline" className="text-xs">{carrito.length} items</Badge>
                     </div>
@@ -495,7 +495,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                                   ${item.precio} x {item.cantidad} = ${(item.precio * item.cantidad).toFixed(2)}
                                 </div>
                               </div>
-                              <div className="flex items-center space-x-2 w-full sm:w-auto">
+                              <div className="flex items-center gap-2 w-full sm:w-auto">
                                 <Input
                                   type="number"
                                   min="1"
@@ -521,7 +521,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
 
                   {/* Métodos de Pago Múltiples */}
                   <div className="order-3 lg:order-3">
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
                       <h3 className="font-semibold flex items-center text-sm sm:text-base">
                         <CreditCard className="h-4 w-4 mr-2" />
                         Métodos de Pago
@@ -690,7 +690,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                         <div className="space-y-1">
                           {venta.pagos ? (
                             venta.pagos.map((pago, index) => (
-                              <div key={index} className="flex items-center space-x-2">
+                              <div key={index} className="flex items-center gap-2">
                                 <Badge variant="outline" className="capitalize text-xs">
                                   {pago.metodo}
                                 </Badge>
@@ -764,7 +764,7 @@ export default function VentasTab({ productos, ventas, proveedores, triggerNewSa
                         <div className="flex flex-wrap gap-2">
                           {venta.pagos ? (
                             venta.pagos.map((pago: any, index: number) => (
-                              <div key={index} className="flex items-center space-x-1">
+                              <div key={index} className="flex items-center gap-1">
                                 <Badge variant="outline" className="capitalize text-xs">
                                   {pago.metodo}
                                 </Badge>

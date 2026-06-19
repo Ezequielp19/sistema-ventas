@@ -524,7 +524,7 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <div>
             <h2 className="text-2xl font-bold">Sistema de Facturación</h2>
@@ -566,7 +566,7 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
 
       {/* Tabs principales */}
       <Tabs defaultValue="facturas" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
           <TabsTrigger value="facturas">Facturas</TabsTrigger>
           <TabsTrigger value="generar">Generar Factura</TabsTrigger>
           <TabsTrigger value="configuracion">Configuración</TabsTrigger>
@@ -602,7 +602,7 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
           {/* Tabla de facturas */}
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle>Historial de Facturas</CardTitle>
                 <ExportButtons 
                   data={facturasFiltradas} 
@@ -716,7 +716,7 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
                 {selectedVenta && (
                   <div className="space-y-4 p-4 bg-muted rounded-lg">
                     <h4 className="font-semibold">Detalles de la Venta</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="font-medium">Cliente:</span> {selectedVenta.cliente}
                       </div>
@@ -883,13 +883,13 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
       {/* Modal de Vista de Factura */}
       {selectedFactura && (
         <Dialog open={!!selectedFactura} onOpenChange={() => setSelectedFactura(null)}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:w-[90vw] max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle>Factura {selectedFactura.numero}</DialogTitle>
             </DialogHeader>
             <div className="space-y-6">
               {/* Encabezado */}
-              <div className="grid grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
                 <div>
                   <h3 className="font-bold text-lg">{configuracion.empresa.nombre}</h3>
                   <p className="text-sm text-muted-foreground">RUC: {configuracion.empresa.ruc}</p>
@@ -946,7 +946,7 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
 
               {/* Totales */}
               <div className="flex justify-end">
-                <div className="w-64 space-y-2">
+                <div className="w-full max-w-sm space-y-2">
                   <div className="flex justify-between">
                     <span>Subtotal:</span>
                     <span>${selectedFactura.subtotal.toFixed(2)}</span>
@@ -979,16 +979,16 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
               </div>
 
               {/* Acciones */}
-              <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={() => imprimirFactura(selectedFactura)}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <Button variant="outline" onClick={() => imprimirFactura(selectedFactura)} className="w-full sm:w-auto">
                   <Printer className="h-4 w-4 mr-2" />
                   Imprimir
                 </Button>
-                <Button variant="outline" onClick={() => descargarFacturaPDF(selectedFactura)}>
+                <Button variant="outline" onClick={() => descargarFacturaPDF(selectedFactura)} className="w-full sm:w-auto">
                   <Download className="h-4 w-4 mr-2" />
                   Descargar PDF
                 </Button>
-                <Button variant="outline" onClick={() => enviarFacturaWhatsApp(selectedFactura)}>
+                <Button variant="outline" onClick={() => enviarFacturaWhatsApp(selectedFactura)} className="w-full sm:w-auto">
                   <Phone className="h-4 w-4 mr-2" />
                   Enviar por WhatsApp
                 </Button>
@@ -1001,7 +1001,7 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
       {/* Modal para confirmar envío de email */}
       {showEmailModal && (
         <Dialog open={showEmailModal} onOpenChange={setShowEmailModal}>
-          <DialogContent>
+          <DialogContent className="w-[95vw] sm:w-auto max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Enviar Factura por Email</DialogTitle>
             </DialogHeader>
@@ -1031,11 +1031,11 @@ ${facturaData.impuesto > 0 ? `Impuesto (${facturaData.porcentajeImpuesto}%): $${
                 />
               </div>
               
-              <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={() => setShowEmailModal(false)}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <Button variant="outline" onClick={() => setShowEmailModal(false)} className="w-full sm:w-auto">
                   Cancelar
                 </Button>
-                <Button onClick={confirmarEnvioWhatsApp} disabled={!clienteEmail || clienteEmail.length < 8}>
+                <Button onClick={confirmarEnvioWhatsApp} disabled={!clienteEmail || clienteEmail.length < 8} className="w-full sm:w-auto">
                   <Phone className="h-4 w-4 mr-2" />
                   Enviar WhatsApp
                 </Button>

@@ -445,7 +445,7 @@ export default function TiendaTab({ productos: productosProp, user, onProductsCh
       </div>
 
       <Tabs defaultValue="productos" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2">
           <TabsTrigger value="productos">Mis Productos</TabsTrigger>
           <TabsTrigger value="configuracion">Configuración</TabsTrigger>
         </TabsList>
@@ -570,13 +570,13 @@ export default function TiendaTab({ productos: productosProp, user, onProductsCh
       </Tabs>
 
       <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] sm:w-[90vw] max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Compartir Producto</DialogTitle>
           </DialogHeader>
           {selectedProductForShare && (
             <div className="space-y-4">
-              <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
                 {(selectedProductForShare.imageUrl || selectedProductForShare.imagen) && (
                   <img
                     src={selectedProductForShare.imageUrl || selectedProductForShare.imagen}
@@ -617,7 +617,7 @@ export default function TiendaTab({ productos: productosProp, user, onProductsCh
                 >
                   <div>
                     <Label>Enlace directo del producto</Label>
-                    <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                       <Input
                         value={`${window.location.origin}/tienda/${userId}/producto/${selectedProductForShare.id}`}
                         readOnly
@@ -641,7 +641,7 @@ export default function TiendaTab({ productos: productosProp, user, onProductsCh
                 >
                   <div>
                     <Label>Enlace del catálogo completo</Label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <Input
                         value={userId ? `${window.location.origin}/tienda/${userId}` : "Usuario no identificado"}
                         readOnly

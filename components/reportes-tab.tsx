@@ -340,7 +340,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                   const porcentaje = (datos.total / metricas.totalVentas) * 100
                   return (
                     <div key={metodo} className="space-y-2">
-                      <div className="flex justify-between items-center">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <span className="font-medium capitalize">{metodo}</span>
                         <span className="text-sm text-muted-foreground">
                           ${datos.total.toFixed(2)} ({porcentaje.toFixed(1)}%)
@@ -416,7 +416,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                         <div className="space-y-1">
                           {venta.pagos ? (
                             venta.pagos.map((pago, index) => (
-                              <div key={index} className="flex items-center space-x-2">
+                              <div key={index} className="flex items-center gap-2">
                                 <Badge variant="outline" className="capitalize text-xs">
                                   {pago.metodo}
                                 </Badge>
@@ -572,7 +572,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
                       {/* Información básica */}
                       <div>
-                        <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center justify-between gap-2 mb-2">
                           <h4 className="font-semibold">Venta #{index + 1}</h4>
                           <Badge variant="outline">{new Date(venta.fecha).toLocaleTimeString()}</Badge>
                         </div>
@@ -609,7 +609,7 @@ export default function ReportesTab({ ventas, productos, proveedores }: Reportes
                             venta.pagos.map((pago: any, pagoIndex: number) => (
                               <div
                                 key={pagoIndex}
-                                className="flex items-center justify-between text-sm bg-muted p-2 rounded"
+                                className="flex items-center justify-between gap-2 text-sm bg-muted p-2 rounded"
                               >
                                 <Badge variant="outline" className="capitalize">
                                   {pago.metodo}

@@ -41,7 +41,7 @@ import {
   Wallet,
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { seedDemoDataForBusiness } from "@/src/services/demo-data.service"
+import { deleteDemoDataForBusiness, seedDemoDataForBusiness } from "@/src/services/demo-data.service"
 import {
   addMonthsToDateString,
   calculateBillingStatus,
@@ -168,6 +168,9 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<{ id: string; userData: InternalUserRecord } | null>(null)
   const [permanentDeleteConfirmation, setPermanentDeleteConfirmation] = useState("")
   const [permanentDeleteLoading, setPermanentDeleteLoading] = useState(false)
+  const [demoDeleteTarget, setDemoDeleteTarget] = useState<{ id: string; userData: InternalUserRecord } | null>(null)
+  const [demoDeleteConfirmation, setDemoDeleteConfirmation] = useState("")
+  const [demoDeleteLoading, setDemoDeleteLoading] = useState(false)
   const paymentNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialPaymentStatusRef = useRef<BillingStatus>("al_dia")
 
@@ -1229,6 +1232,74 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
     }
   }
 
+  const handleOpenDemoDeleteDialog = (id: string, userData: InternalUserRecord) => {
+    setDemoDeleteTarget({ id, userData })
+    setDemoDeleteConfirmation("")
+  }
+
+  const handleConfirmDeleteDemo = async () => {
+    if (!demoDeleteTarget || demoDeleteConfirmation.trim().toUpperCase() !== "DEMO") {
+      setError("Escribí DEMO para confirmar la eliminación de datos demo")
+      return
+    }
+
+    const { id, userData } = demoDeleteTarget
+    const businessId = getClientBusinessId(userData, id)
+    const businessLabel = userData.nombre || userData.empresa || userData.email || businessId
+
+    try {
+      setDemoDeleteLoading(true)
+      setError("")
+      setSuccess("")
+      await ensureSuperAdminFirebaseAuth()
+
+      const result = await deleteDemoDataForBusiness(businessId)
+      const totalDeleted =
+        result.firestore.products +
+        result.firestore.providers +
+        result.firestore.sales +
+        result.legacy.products +
+        result.legacy.providers +
+        result.legacy.sales
+
+      if (
+        totalDeleted === 0 &&
+        !result.firestore.storeConfigDeleted &&
+        !result.legacy.storeConfigDeleted
+      ) {
+        setSuccess("No se encontraron datos demo para eliminar.")
+      } else {
+        const summaryParts = [
+          `${result.firestore.products + result.legacy.products} productos eliminados`,
+          `${result.firestore.providers + result.legacy.providers} proveedores eliminados`,
+          `${result.firestore.sales + result.legacy.sales} ventas eliminadas`,
+        ]
+
+        if (result.firestore.storeConfigDeleted || result.legacy.storeConfigDeleted) {
+          summaryParts.push("tienda demo eliminada")
+        }
+
+        setSuccess(`Datos demo eliminados de ${businessLabel}. ${summaryParts.join(", ")}.`)
+      }
+
+      await loadData()
+      setDemoDeleteTarget(null)
+      setDemoDeleteConfirmation("")
+    } catch (error) {
+      console.error("Error al eliminar datos demo:", error)
+      const errorDetails = getErrorDetails(error)
+      if (errorDetails.code === "PERMISSION_DENIED") {
+        setError("Error de permisos. Verifica las reglas de seguridad de Firebase.")
+      } else {
+        setError(
+          `Error al eliminar los datos demo: ${errorDetails.code ? `${errorDetails.code}: ` : ""}${errorDetails.message || "Error desconocido"}`,
+        )
+      }
+    } finally {
+      setDemoDeleteLoading(false)
+    }
+  }
+
   const copyPassword = async (password: string) => {
     if (!password) {
       setError("No hay contraseña disponible para copiar")
@@ -1271,18 +1342,18 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
   return (
     <div className="min-h-screen bg-background">
       <header className="bg-card shadow-sm border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+          <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:space-x-4">
               <Crown className="h-8 w-8 text-yellow-500" />
-              <div>
+              <div className="min-w-0">
                 <h1 className="text-2xl font-bold text-foreground">Panel Super Administrador</h1>
-                <p className="text-sm text-muted-foreground">Gestión de usuarios del sistema</p>
+                <p className="text-sm text-muted-foreground break-words">Gestión de usuarios del sistema</p>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center gap-2 sm:gap-4">
               <ThemeToggle />
-              <Button variant="outline" onClick={onLogout}>
+              <Button variant="outline" onClick={onLogout} className="whitespace-nowrap">
                 <LogOut className="h-4 w-4 mr-2" />
                 Cerrar Sesión
               </Button>
@@ -1291,9 +1362,9 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-6 sm:py-8">
         {paymentNotice && (
-          <div className="fixed bottom-4 right-4 z-50 w-full max-w-sm">
+          <div className="fixed bottom-4 left-4 right-4 z-50 w-auto sm:left-auto sm:right-4 sm:max-w-sm">
             <Alert variant={paymentNotice.type === "error" ? "destructive" : "default"} className="shadow-lg">
               <AlertDescription className="text-sm">{paymentNotice.message}</AlertDescription>
             </Alert>
@@ -1337,10 +1408,10 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
             </Card>
           </div>
 
-          <div className="flex justify-between items-center">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <h2 className="text-xl font-semibold">Gestión de Usuarios</h2>
-              <p className="text-muted-foreground">Administra los usuarios del sistema</p>
+              <p className="text-muted-foreground break-words">Administra los usuarios del sistema</p>
             </div>
             <Dialog open={showUserDialog} onOpenChange={setShowUserDialog}>
               <DialogTrigger asChild>
@@ -1369,7 +1440,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                     </Alert>
                   )}
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="nombre">Nombre</Label>
                       <Input
@@ -1390,10 +1461,10 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="password">Contraseña</Label>
-                      <div className="flex space-x-2">
+                      <div className="flex gap-2">
                         <Input
                           id="password"
                           type="password"
@@ -1421,7 +1492,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="rol">Rol</Label>
                       <Select
@@ -1458,7 +1529,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                       <BadgeDollarSign className="h-4 w-4" />
                       Datos de pago
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="plan">Plan</Label>
                         <Input
@@ -1562,8 +1633,8 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                       </div>
                     </div>
                   </div>
-                  <div className="flex justify-end space-x-2">
-                    <Button type="button" variant="outline" onClick={() => setShowUserDialog(false)}>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="outline" onClick={() => setShowUserDialog(false)} className="w-full sm:w-auto">
                       Cancelar
                     </Button>
                     <Button type="submit" disabled={sendingEmail || savingUser}>
@@ -1638,6 +1709,66 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                         disabled={pendingClientDecision !== null}
                       >
                         {pendingClientDecision === "clean" ? "Procesando..." : "Crear cliente limpio"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+            <Dialog
+              open={Boolean(demoDeleteTarget)}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setDemoDeleteTarget(null)
+                  setDemoDeleteConfirmation("")
+                }
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Eliminar datos demo</DialogTitle>
+                </DialogHeader>
+                {demoDeleteTarget && (
+                  <div className="space-y-4">
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        Esto eliminará únicamente datos demo marcados como demo. No borra datos reales.
+                      </AlertDescription>
+                    </Alert>
+                    <div className="rounded-lg border border-border/60 p-4 text-sm text-muted-foreground space-y-1">
+                      <p><strong>Cliente:</strong> {demoDeleteTarget.userData.nombre || demoDeleteTarget.userData.empresa || demoDeleteTarget.userData.email}</p>
+                      <p><strong>Email:</strong> {demoDeleteTarget.userData.email || "Sin email"}</p>
+                      <p><strong>Negocio:</strong> {getClientBusinessId(demoDeleteTarget.userData, demoDeleteTarget.id)}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="demo-delete-confirmation">Escribí DEMO para confirmar</Label>
+                      <Input
+                        id="demo-delete-confirmation"
+                        value={demoDeleteConfirmation}
+                        onChange={(e) => setDemoDeleteConfirmation(e.target.value)}
+                        placeholder="DEMO"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setDemoDeleteTarget(null)
+                          setDemoDeleteConfirmation("")
+                        }}
+                        disabled={demoDeleteLoading}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        onClick={handleConfirmDeleteDemo}
+                        disabled={demoDeleteLoading || demoDeleteConfirmation.trim().toUpperCase() !== "DEMO"}
+                      >
+                        {demoDeleteLoading ? "Eliminando..." : "Eliminar demo"}
                       </Button>
                     </div>
                   </div>
@@ -1727,8 +1858,8 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
 
           <Card>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-              <Table className="min-w-[1280px]">
+              <div className="w-full overflow-x-auto">
+              <Table className="min-w-[1280px] w-full">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nombre</TableHead>
@@ -1817,7 +1948,7 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex space-x-2">
+                      <div className="flex gap-2">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1874,6 +2005,19 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
                                 <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
                               ) : (
                                 <Database className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleOpenDemoDeleteDialog(userData.id, userData)}
+                              title="Eliminar datos demo"
+                              disabled={demoDeleteLoading && demoDeleteTarget?.id === userData.id}
+                            >
+                              {demoDeleteLoading && demoDeleteTarget?.id === userData.id ? (
+                                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-current" />
+                              ) : (
+                                <Trash2 className="h-4 w-4 text-amber-500" />
                               )}
                             </Button>
                             <Button

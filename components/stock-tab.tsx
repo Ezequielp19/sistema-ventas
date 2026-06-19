@@ -103,7 +103,7 @@ export default function StockTab({ productos, stockBajo }: StockTabProps) {
       {stockBajo.length > 0 && (
         <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
           <CardHeader className="pb-3">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="text-red-800 dark:text-red-200 flex items-center text-sm sm:text-base">
                 <Package className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
                 <span className="hidden sm:inline">Productos con Stock Bajo ({stockBajo.length})</span>
@@ -310,7 +310,7 @@ export default function StockTab({ productos, stockBajo }: StockTabProps) {
                       </div>
                       
                       {/* Información de stock */}
-                      <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                         <div>
                           <span className="text-muted-foreground">Stock Actual:</span>
                           <p className="font-medium">{producto.stock}</p>

@@ -353,7 +353,7 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
                     <TableCell>{proveedor.email}</TableCell>
                     <TableCell>{getProductosCount(proveedor.id)} productos</TableCell>
                     <TableCell>
-                      <div className="flex space-x-2">
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -477,7 +477,7 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
 
         {/* Dialog para ajuste de precios */}
         <Dialog open={showPriceDialog} onOpenChange={setShowPriceDialog}>
-          <DialogContent className="w-[95vw] sm:w-full max-w-md">
+          <DialogContent className="w-[95vw] sm:w-full max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle className="text-lg sm:text-xl">Ajustar Precios por Proveedor</DialogTitle>
             </DialogHeader>
@@ -497,7 +497,7 @@ export default function ProveedoresTab({ proveedores, productos }: { proveedores
               </div>
 
               <Tabs defaultValue="aumento" value={tipoAjuste} onValueChange={setTipoAjuste}>
-                <TabsList className="grid w-full grid-cols-2">
+                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2">
                   <TabsTrigger value="aumento" className="text-xs sm:text-sm">Aumentar Precios</TabsTrigger>
                   <TabsTrigger value="reduccion" className="text-xs sm:text-sm">Reducir Precios</TabsTrigger>
                 </TabsList>

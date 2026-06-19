@@ -190,7 +190,7 @@ export default function TiendaConfig({ user }: { user: User }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold">Configuración de Mi Tienda</h2>
           <p className="text-muted-foreground">
@@ -205,7 +205,7 @@ export default function TiendaConfig({ user }: { user: User }) {
               Editar Configuración
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:w-[90vw] max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle>Configuración de la Tienda</DialogTitle>
             </DialogHeader>
