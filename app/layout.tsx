@@ -4,11 +4,13 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/contexts/theme-context"
 import { AuthProvider } from "@/contexts/auth-context"
+import { InstallAppButton } from "@/components/install-app-button"
 
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://app.gestionpro.pro"),
+  manifest: "/manifest.webmanifest",
   title: {
     default: "GestiónPro | gestionpro.app",
     template: "%s | GestiónPro",
@@ -54,6 +56,7 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>{children}</AuthProvider>
         </ThemeProvider>
+        <InstallAppButton />
       </body>
     </html>
   )
