@@ -612,6 +612,8 @@ export default function SuperAdminPanel({ user, onLogout }: SuperAdminPanelProps
         contact_email: GESTIONPRO_CONTACT_EMAIL,
       }
 
+      console.log("EMAILJS PAYLOAD", templateParams)
+
       await emailjs.send(
         EMAILJS_SERVICE_ID,
         ACCOUNT_CREATION_TEMPLATE_ID,
